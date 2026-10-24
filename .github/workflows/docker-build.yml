@@ -18,6 +18,8 @@ env:
 
 jobs:
   quality-gate:
+    # Publishes RiDDiX's own image and releases; forks build with their own workflow
+    if: github.repository_owner == 'RiDDiX'
     runs-on: ubuntu-latest
     # Real servers for ProviderIntegrationTest; SQLite alone let issue #10 through
     services:
