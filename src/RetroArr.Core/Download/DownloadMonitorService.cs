@@ -191,6 +191,9 @@ namespace RetroArr.Core.Download
                 return new NzbgetClient(config.Host, config.Port, config.Username ?? "", config.Password ?? "", config.UrlBase);
             if (config.Implementation.Equals("Deluge", StringComparison.OrdinalIgnoreCase))
                 return new DelugeClient(config.Host, config.Port, config.Password ?? "", config.UseSsl, config.Category);
+            // A watch folder keeps its path in Host
+            if (config.Implementation.Equals(WatchFolderClient.ImplementationName, StringComparison.OrdinalIgnoreCase))
+                return new WatchFolderClient(config.Host, config.Category);
             return null;
         }
     }

@@ -36,6 +36,7 @@ namespace RetroArr.Core.Test.Download
 
         [TestCase("qBittorrent", true)]
         [TestCase("Deluge", true)]
+        [TestCase("WatchFolder", true)]
         [TestCase("SABnzbd", false)]
         public async Task Import_LeavesTorrentSourceUntouched_AndStillCleansUsenet(string implementation, bool keepsSource)
         {

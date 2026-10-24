@@ -1450,12 +1450,13 @@ namespace RetroArr.Core.Download
         private static bool SamePath(string a, string b) =>
             string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
 
-        private static readonly string[] TorrentClients = { "qBittorrent", "Transmission", "Deluge" };
+        // Clients whose files stay where they are: a torrent client seeds from them, a watch folder is the user's own
+        private static readonly string[] KeepSourceClients = { "qBittorrent", "Transmission", "Deluge", WatchFolderClient.ImplementationName };
 
         private bool IsTorrentDownload(DownloadStatus download)
         {
             var implementation = _configService.LoadDownloadClients().FirstOrDefault(c => c.Id == download.ClientId)?.Implementation;
-            return TorrentClients.Contains(implementation, StringComparer.OrdinalIgnoreCase);
+            return KeepSourceClients.Contains(implementation, StringComparer.OrdinalIgnoreCase);
         }
 
         // Moves nothing if any file would land on something that isn't ours (only files an earlier

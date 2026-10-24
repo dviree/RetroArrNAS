@@ -167,6 +167,10 @@ namespace RetroArr.Api.V3.DownloadClients
                     {
                         client = new DelugeClient(config.Host, config.Port, config.Password ?? "", config.UseSsl, config.Category);
                     }
+                    else if (config.Implementation.Equals(WatchFolderClient.ImplementationName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        client = new WatchFolderClient(config.Host, config.Category);
+                    }
 
                     if (client != null)
                     {
@@ -175,7 +179,7 @@ namespace RetroArr.Api.V3.DownloadClients
                         {
                             d.ClientId = config.Id;
                             d.ClientName = config.Name;
-                            d.PlatformFolder = _platformTracker.LookupByName(d.Name);
+                            d.PlatformFolder = _platformTracker.LookupByName(d.Name) ?? d.PlatformFolder;
                             d.GameId = _platformTracker.LookupGameId(d.Name);
                             if (_importStatus.IsImporting(config.Id, d.Id))
                             {
@@ -416,6 +420,8 @@ namespace RetroArr.Api.V3.DownloadClients
                 return new NzbgetClient(config.Host, config.Port, config.Username ?? "", config.Password ?? "", config.UrlBase);
             if (config.Implementation.Equals("Deluge", StringComparison.OrdinalIgnoreCase))
                 return new DelugeClient(config.Host, config.Port, config.Password ?? "", config.UseSsl, category);
+            if (config.Implementation.Equals(WatchFolderClient.ImplementationName, StringComparison.OrdinalIgnoreCase))
+                return new WatchFolderClient(config.Host, category);
             return null;
         }
 
@@ -546,6 +552,15 @@ namespace RetroArr.Api.V3.DownloadClients
                         version = await delugeClient.GetVersionAsync();
                     }
                 }
+                else if (request.Implementation.Equals(WatchFolderClient.ImplementationName, StringComparison.OrdinalIgnoreCase))
+                {
+                    var watchFolder = new WatchFolderClient(request.Host);
+                    isConnected = await watchFolder.TestConnectionAsync();
+                    if (isConnected)
+                    {
+                        version = await watchFolder.GetVersionAsync();
+                    }
+                }
                 else
                 {
                     return BadRequest(new { message = $"Unsupported download client: {request.Implementation}" });
@@ -628,7 +643,8 @@ namespace RetroArr.Api.V3.DownloadClients
                 {
                     // Prioritize Torrent clients (default)
                      client = _clients
-                        .Where(c => c.Enable && !c.Implementation.Equals("SABnzbd", StringComparison.OrdinalIgnoreCase) && !c.Implementation.Equals("NZBGet", StringComparison.OrdinalIgnoreCase))
+                        .Where(c => c.Enable && !c.Implementation.Equals("SABnzbd", StringComparison.OrdinalIgnoreCase) && !c.Implementation.Equals("NZBGet", StringComparison.OrdinalIgnoreCase)
+                            && !c.Implementation.Equals(WatchFolderClient.ImplementationName, StringComparison.OrdinalIgnoreCase))
                         .OrderBy(c => c.Priority).ThenBy(c => c.Id)
                         .FirstOrDefault();
                 }

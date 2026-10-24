@@ -329,6 +329,38 @@ namespace RetroArr.Core.Test.Search
         }
 
         [Test]
+        public async Task AutoGrab_WithOnlyAWatchFolder_GrabsNothing()
+        {
+            using var jackett = FakeJackett(("Halo 3 X360 P2P", 1050));
+            var config = AutoGrabConfig(FreePort());
+            config.SaveDownloadClients(new List<DownloadClient>
+            {
+                new DownloadClient { Id = 1, Name = "inbox", Implementation = WatchFolderClient.ImplementationName, Host = _root, Enable = true }
+            });
+
+            var result = await Search(config, jackett.Port, autoDispatch: true);
+
+            Assert.That(result.AutoQueued, Is.False);
+            Assert.That(new DownloadPlatformTracker(Path.Combine(_root, "config")).HasPendingGrab(1), Is.False);
+        }
+
+        [Test]
+        public async Task AutoGrab_SkipsAWatchFolderThatComesFirst_AndUsesTheTorrentClient()
+        {
+            using var jackett = FakeJackett(("Halo 3 X360 P2P", 1050));
+            using var deluge = new FakeServer("""{"result": false, "error": null, "id": 1}""");
+            var config = AutoGrabConfig(deluge.Port);
+            var clients = config.LoadDownloadClients();
+            clients[0].Id = 2;
+            clients.Insert(0, new DownloadClient { Id = 1, Name = "inbox", Implementation = WatchFolderClient.ImplementationName, Host = _root, Enable = true });
+            config.SaveDownloadClients(clients);
+
+            await Search(config, jackett.Port, autoDispatch: true);
+
+            Assert.That(deluge.Bodies, Is.Not.Empty, "the grab went to the watch folder instead of Deluge");
+        }
+
+        [Test]
         public async Task AutoGrab_TheClientRefuses_LeavesNoPendingGrab()
         {
             using var jackett = FakeJackett(("Halo 3 X360 P2P", 1050));

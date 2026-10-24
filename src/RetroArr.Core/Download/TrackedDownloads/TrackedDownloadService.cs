@@ -89,7 +89,8 @@ namespace RetroArr.Core.Download.TrackedDownloads
         // it has none yet. A game mapped by hand, or no game, stays.
         public TrackedDownload TrackDownload(DownloadStatus download, int clientId, string clientName, DownloadPlatformTracker grabs)
         {
-            download.PlatformFolder = grabs.LookupByName(download.Name);
+            // A client that knows the platform itself (a watch folder) keeps it when no grab says otherwise
+            download.PlatformFolder = grabs.LookupByName(download.Name) ?? download.PlatformFolder;
             download.GameId = grabs.LookupGameId(download.Name);
             download.ImportSubfolder = grabs.LookupImportSubfolder(download.Name);
             var tracked = TrackDownload(download, clientId, clientName);

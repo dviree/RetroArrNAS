@@ -406,8 +406,9 @@ namespace RetroArr.Core.Search
 
         private async Task<bool> DispatchToDownloadClientAsync(SearchResult release, Game game, CancellationToken ct)
         {
+            // A watch folder only hands over what is already on disk, it never takes a grab
             var clients = _config.LoadDownloadClients()
-                .Where(c => c.Enable)
+                .Where(c => c.Enable && !c.Implementation.Equals(WatchFolderClient.ImplementationName, StringComparison.OrdinalIgnoreCase))
                 .ToList();
             if (clients.Count == 0)
             {
