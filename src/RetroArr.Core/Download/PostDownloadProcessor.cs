@@ -291,25 +291,20 @@ namespace RetroArr.Core.Download
 
             try 
             {
-                // The model names the game first (as GameSauce did); IGDB double-checks that name
+                // AI cleanup gives IGDB a better query; the AI candidate only stands in where IGDB verifies neither name
                 var aiGuess = _ai is { IsEnabled: true } ? await _ai.IdentifyAsync(download.Name, FileNamesFor(download.DownloadPath)) : null;
-                var query = aiGuess?.Title ?? cleanName;
                 var metadataService = _metadataFactory.CreateService();
-                var searchResults = await metadataService.SearchGamesAsync(query);
-                if (searchResults.Any())
+                var results = new List<Game>();
+                if (aiGuess != null && _ai!.Cleanup) results.AddRange(await metadataService.SearchGamesAsync(aiGuess.Title));
+                if (aiGuess == null || !_ai!.Cleanup || TitleKey(aiGuess.Title) != TitleKey(cleanName))
+                    results.AddRange(await metadataService.SearchGamesAsync(cleanName));
+                var (chosen, source) = ChooseName(cleanName, _ai?.Source == true ? aiGuess : null, aiGuess?.Title, results);
+                if (chosen != null)
                 {
-                    var best = BestMatch(searchResults, query);
-                    // IGDB's spelling when it knows the model's title, else the model's title over a different IGDB game
-                    containerName = SanitizeFileName(aiGuess == null || TitleKey(best.Title) == TitleKey(aiGuess.Title) ? best.Title : aiGuess.Title);
+                    containerName = SanitizeFileName(chosen);
                     shouldNest = true;
-                    _logger.Info($"[PostDownload] Resolved game name: '{download.Name}' -> '{containerName}'"
-                        + (aiGuess != null ? $" (AI: '{aiGuess.Title}', IGDB: '{best.Title}')" : ""));
-                }
-                else if (aiGuess != null)
-                {
-                    containerName = SanitizeFileName(aiGuess.Title);
-                    shouldNest = true;
-                    _logger.Info($"[PostDownload] Resolved game name from AI, not on IGDB: '{download.Name}' -> '{containerName}'");
+                    _logger.Info($"[PostDownload] Resolved game name ({source}): '{download.Name}' -> '{containerName}'"
+                        + (aiGuess != null ? $" (AI: '{aiGuess.Title}', {aiGuess.Confidence:P0})" : ""));
                 }
                 else
                 {
@@ -914,6 +909,20 @@ namespace RetroArr.Core.Download
 
         // The search ranks a bundle or an edition before the game itself at times ("Super Mario Galaxy + Super Mario
         // Galaxy 2" for "Super Mario Galaxy 2"), so a result named exactly as the release wins over the first one
+        /// <summary>
+        /// The name for an import and where it came from: an IGDB title matching the AI's or the release's own name
+        /// exactly (verified) wins; else the AI candidate when there is one; else IGDB's first result; else none.
+        /// </summary>
+        internal static (string? Name, string Source) ChooseName(string cleanName, AiTitleService.Guess? aiCandidate, string? aiTitle, List<Game> results)
+        {
+            var keys = new[] { aiTitle, cleanName }.Where(k => !string.IsNullOrWhiteSpace(k)).Select(TitleKey).Where(k => k.Length > 0).ToList();
+            var verified = results.FirstOrDefault(r => keys.Contains(TitleKey(r.Title)));
+            if (verified != null) return (verified.Title, "IGDB, verified");
+            if (aiCandidate != null) return (aiCandidate.Title, "AI candidate, not on IGDB");
+            if (results.Count > 0) return (results[0].Title, "IGDB, first result");
+            return (null, "none");
+        }
+
         internal static Game BestMatch(List<Game> results, string query)
         {
             var key = TitleKey(query);

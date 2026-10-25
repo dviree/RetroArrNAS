@@ -14,7 +14,7 @@ namespace RetroArr.Core.MetadataSource
 {
     /// <summary>
     /// Asks an OpenAI model which game and platform a release is, from its name and the files in it, the way GameSauce
-    /// did. The import uses the answer first and has IGDB double-check the name. Off unless OPENAI_API_KEY is set;
+    /// did. Not an authoritative source: a title IGDB verifies always wins over the model's. Off unless OPENAI_API_KEY is set;
     /// OPENAI_MODEL picks the model, AI_MIN_CONFIDENCE (default 0.70) how sure it has to be. Each release is asked once.
     /// </summary>
     [SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes")]
@@ -44,6 +44,14 @@ namespace RetroArr.Core.MetadataSource
         }
 
         public bool IsEnabled => !string.IsNullOrWhiteSpace(_apiKey);
+
+        // The two roles of beets-aisauce, each on unless set to false: cleanup turns a release name into a better IGDB
+        // query; source lets the model's title stand in where IGDB has nothing that matches
+        public bool Cleanup { get; init; } = Flag("AI_CLEANUP");
+        public bool Source { get; init; } = Flag("AI_SOURCE");
+
+        private static bool Flag(string name) =>
+            !string.Equals(Environment.GetEnvironmentVariable(name), "false", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>A confident guess, or null when the model is off, unsure, names no known platform or can't be reached.</summary>
         public async Task<Guess?> IdentifyAsync(string releaseName, IEnumerable<string> fileNames, CancellationToken ct = default)
