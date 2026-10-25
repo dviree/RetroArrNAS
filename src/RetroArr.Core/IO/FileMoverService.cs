@@ -77,6 +77,21 @@ namespace RetroArr.Core.IO
                 _logger.Error($"[FileMover] Hardlink failed ({ex.Message}). Falling back to copy.");
             }
 
+            // btrfs shares (subvolumes) refuse hard links between them but share data blocks with a reflink:
+            // an independent file that takes no extra space until one of them changes
+            try
+            {
+                if (TryReflink(sourceFile, destinationFile))
+                {
+                    _logger.Info($"[FileMover] Reflinked (no extra space): {destinationFile} <- {sourceFile}");
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Info($"[FileMover] Reflink not possible ({ex.Message}). Copying.");
+            }
+
             try
             {
                 _logger.Info($"[FileMover] Copying file: {sourceFile} -> {destinationFile}");
@@ -120,6 +135,47 @@ namespace RetroArr.Core.IO
                 return true;
             }
         }
+
+        // FICLONE: the destination gets the source's data blocks (btrfs, XFS). Tried directly, then through the shared
+        // mount, since Linux refuses it between two mounts. Leaves nothing behind when it fails.
+        private const ulong FICLONE = 0x40049409;
+
+        private static bool TryReflink(string source, string destination)
+        {
+            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) return false;
+            if (Clone(source, destination)) return true;
+            var (s, d) = (SharedMount.Translate(source), SharedMount.Translate(destination));
+            return s != null && d != null && Clone(s, d);
+        }
+
+        private static bool Clone(string source, string destination)
+        {
+            var ok = false;
+            var created = false;
+            try
+            {
+                using var src = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                using (var dst = new FileStream(destination, FileMode.CreateNew, FileAccess.Write))
+                {
+                    created = true;
+                    ok = Ioctl((int)dst.SafeFileHandle.DangerousGetHandle(), FICLONE, (int)src.SafeFileHandle.DangerousGetHandle()) == 0;
+                }
+                ok = ok && new FileInfo(destination).Length == src.Length;
+                return ok;
+            }
+            finally
+            {
+                // Only a file this call made is removed, never one that was there
+                if (!ok && created)
+                {
+                    try { File.Delete(destination); }
+                    catch (IOException) { }
+                }
+            }
+        }
+
+        [DllImport("libc", SetLastError = true, EntryPoint = "ioctl")]
+        private static extern int Ioctl(int fd, ulong request, int arg);
 
         // Windows Kernel32
         [DllImport("Kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
