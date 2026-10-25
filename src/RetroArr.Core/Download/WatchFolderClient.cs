@@ -55,11 +55,38 @@ namespace RetroArr.Core.Download
 
         private readonly string _folder;
         private readonly string? _category;
+        private readonly bool _recursive;
 
-        public WatchFolderClient(string folder, string? category = null)
+        // Torrent clients' save folders inside an inbox: their files seed and are never a watch folder's to take
+        private static readonly HashSet<string> TorrentFolders = new(StringComparer.OrdinalIgnoreCase) { "torrents", "qbit-romarr" };
+
+        // Leftovers and NAS bookkeeping that are never a game
+        private static readonly HashSet<string> NeverGames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "_CommonRedist", "CommonRedist", "__MACOSX", "@eaDir", "#recycle", "$RECYCLE.BIN", "System Volume Information"
+        };
+
+        // Files that say nothing about whether a folder is a game
+        private static readonly HashSet<string> JunkExtensions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ".txt", ".nfo", ".url", ".jpg", ".jpeg", ".png", ".gif", ".webp", ".sfv", ".md5", ".sha1", ".db", ".ini", ".log", ".xml", ".par2", ".torrent"
+        };
+
+        // One game per file, as in a ROM set; multi-disc and multi-track files share a name once their disc/track part is gone
+        private static readonly HashSet<string> RomExtensions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ".nes", ".fds", ".sfc", ".smc", ".gb", ".gbc", ".gba", ".nds", ".3ds", ".cia", ".n64", ".z64", ".v64", ".md", ".gen", ".smd",
+            ".sms", ".gg", ".32x", ".pce", ".a26", ".a78", ".lnx", ".ws", ".wsc", ".ngp", ".ngc", ".vb", ".iso", ".chd", ".cso", ".rvz",
+            ".gcz", ".wbfs", ".wua", ".nsp", ".nsz", ".xci", ".xcz", ".pbp", ".cue", ".bin", ".gdi", ".cdi", ".zip", ".7z"
+        };
+        private static readonly Regex DiscPart = new(@"\s*[\(\[]?\b(disc|disk|cd|track)\s*\d+[\)\]]?", RegexOptions.IgnoreCase);
+        private const int MaxDepth = 6;
+
+        public WatchFolderClient(string folder, string? category = null, bool recursive = false)
         {
             _folder = folder;
             _category = category;
+            _recursive = recursive;
         }
 
         public Task<bool> TestConnectionAsync() => Task.FromResult(Readable(_folder));
@@ -101,10 +128,11 @@ namespace RetroArr.Core.Download
                 return Task.FromResult(result);
             }
 
-            foreach (var entry in new DirectoryInfo(_folder).EnumerateFileSystemInfos())
+            var entries = _recursive
+                ? Units(new DirectoryInfo(_folder), 0)
+                : new DirectoryInfo(_folder).EnumerateFileSystemInfos().Where(e => !e.Name.StartsWith('.'));
+            foreach (var entry in entries)
             {
-                // Hidden entries are other tools' work folders (.gamesauce-work, .retroarr-extract-...)
-                if (entry.Name.StartsWith('.')) continue;
                 try
                 {
                     var status = Describe(entry);
@@ -161,6 +189,63 @@ namespace RetroArr.Core.Download
             };
         }
 
+        /// <summary>
+        /// The games under a folder: a folder holding game files (or a PS game folder) is one game, a folder of folders is
+        /// a collection to look into, and a folder of single-file ROMs with different names is one game per file.
+        /// Hidden folders and torrent save folders are left out.
+        /// </summary>
+        private IEnumerable<FileSystemInfo> Units(DirectoryInfo dir, int depth)
+        {
+            IEnumerable<FileSystemInfo> children;
+            try { children = dir.EnumerateFileSystemInfos().ToList(); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.Warn($"[WatchFolder] Cannot list {dir.FullName}: {ex.Message}");
+                yield break;
+            }
+            foreach (var entry in children)
+            {
+                if (entry.Name.StartsWith('.')) continue;
+                if (entry is FileInfo file)
+                {
+                    if (!JunkExtensions.Contains(file.Extension)) yield return file;
+                    continue;
+                }
+                var sub = (DirectoryInfo)entry;
+                if (TorrentFolders.Contains(sub.Name) || NeverGames.Contains(sub.Name)) continue;
+                // A game is taken whole; a collection or a ROM set is looked into, where loose ROMs are one game each
+                if (Classify(sub, depth) == Kind.Game) yield return sub;
+                else foreach (var unit in Units(sub, depth + 1)) yield return unit;
+            }
+        }
+
+        private enum Kind { Game, Collection, RomSet }
+
+        private static Kind Classify(DirectoryInfo dir, int depth)
+        {
+            if (depth >= MaxDepth) return Kind.Game;
+            if (File.Exists(Path.Combine(dir.FullName, "eboot.bin")) || Directory.Exists(Path.Combine(dir.FullName, "sce_sys"))) return Kind.Game;
+            var files = dir.EnumerateFiles().Where(f => !f.Name.StartsWith('.') && !JunkExtensions.Contains(f.Extension)).ToList();
+            if (files.Count == 0) return Kind.Collection;
+            // A ROM set: only single-file ROMs, more than one game among them, each game one file
+            if (files.All(f => RomExtensions.Contains(f.Extension)))
+            {
+                var games = files.GroupBy(f => DiscPart.Replace(Path.GetFileNameWithoutExtension(f.Name), "").Trim().ToLowerInvariant()).ToList();
+                if (games.Count > 1 && games.All(g => g.Count() == 1)) return Kind.RomSet;
+                // One ROM in a folder named for something else (a site, a source) is the game, not the folder
+                if (games.Count == 1 && games[0].Count() == 1 && !NamesAlike(dir.Name, games[0].Key)) return Kind.RomSet;
+            }
+            return Kind.Game;
+        }
+
+        // At least half of the folder name's words appear in the file's name
+        private static bool NamesAlike(string folder, string file)
+        {
+            static HashSet<string> Words(string s) => Regex.Matches(s.ToLowerInvariant(), @"[a-z0-9]+").Select(m => m.Value).ToHashSet();
+            var a = Words(folder);
+            return a.Count > 0 && a.Count(Words(file).Contains) * 2 >= a.Count;
+        }
+
         internal static string Describe(Games.PlayStationPackage p)
         {
             var format = p.Format switch
@@ -173,6 +258,8 @@ namespace RetroArr.Core.Download
                 Games.PlayStationFormat.Archive => "archive (not unpacked)",
                 _ => "unknown format"
             };
+            if (p.Format == Games.PlayStationFormat.Archive && p.Inside != Games.PlayStationFormat.Unknown)
+                format = $"archive holding {Describe(p with { Format = p.Inside, TitleId = null, Version = null })}";
             var id = string.Join(" ", new[] { p.TitleId, p.Version != null ? "v" + p.Version : null }.Where(s => s != null));
             return id.Length > 0 ? $"{format} ({id})" : format;
         }

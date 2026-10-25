@@ -21,6 +21,8 @@ namespace RetroArr.Core.Download
         public bool UseSsl { get; set; }
         // Watch folder only: delete a game's source once every file is verified in the library
         public bool DeleteSourceAfterImport { get; set; }
+        // Watch folder only: look into collection folders for the games, instead of taking each entry as one
+        public bool Recursive { get; set; }
         public int Priority { get; set; }
         
         // Remote Path Mapping

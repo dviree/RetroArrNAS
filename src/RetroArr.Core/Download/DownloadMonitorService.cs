@@ -193,7 +193,7 @@ namespace RetroArr.Core.Download
                 return new DelugeClient(config.Host, config.Port, config.Password ?? "", config.UseSsl, config.Category);
             // A watch folder keeps its path in Host
             if (config.Implementation.Equals(WatchFolderClient.ImplementationName, StringComparison.OrdinalIgnoreCase))
-                return new WatchFolderClient(config.Host, config.Category);
+                return new WatchFolderClient(config.Host, config.Category, config.Recursive);
             return null;
         }
     }

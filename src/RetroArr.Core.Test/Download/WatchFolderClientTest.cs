@@ -147,6 +147,68 @@ namespace RetroArr.Core.Test.Download
             Assert.That((await List()).Single().Id, Is.EqualTo((await List()).Single().Id));
         }
 
+        private async Task<List<string>> ListRecursive() =>
+            (await new WatchFolderClient(_root, null, recursive: true).GetDownloadsAsync())
+                .Select(d => Path.GetRelativePath(_root, d.DownloadPath!)).OrderBy(p => p).ToList();
+
+        [Test]
+        public async Task Recursive_FindsGamesInsideCollections()
+        {
+            Write("usenet/Graveyard Keeper 2/Game.exe");
+            Write("usenet/Graveyard Keeper 2/data/level.pak");
+            Write("usenet/_CommonRedist/vcredist.exe");
+            Write("sites/site-a/Okami (USA).iso");
+            Write("sites/site-a/readme.txt");
+            Write("Loose Game.wbfs");
+            Write("info.nfo");
+
+            Assert.That(await ListRecursive(), Is.EqualTo(new[]
+            {
+                "Loose Game.wbfs",
+                Path.Combine("sites", "site-a", "Okami (USA).iso"),
+                Path.Combine("usenet", "Graveyard Keeper 2")
+            }));
+        }
+
+        [Test]
+        public async Task Recursive_RomSetIsOneGamePerFile_ButDiscsAndTracksStayTogether()
+        {
+            Write("set/NES/Contra (USA).zip");
+            Write("set/NES/Metroid (USA).zip");
+            Write("set/PS1/Final Fantasy VII/Final Fantasy VII (Disc 1).chd");
+            Write("set/PS1/Final Fantasy VII/Final Fantasy VII (Disc 2).chd");
+            Write("set/PS1/Crash/Crash (Track 1).bin");
+            Write("set/PS1/Crash/Crash (Track 2).bin");
+            Write("set/PS1/Crash/Crash.cue");
+
+            Assert.That(await ListRecursive(), Is.EqualTo(new[]
+            {
+                Path.Combine("set", "NES", "Contra (USA).zip"),
+                Path.Combine("set", "NES", "Metroid (USA).zip"),
+                Path.Combine("set", "PS1", "Crash"),
+                Path.Combine("set", "PS1", "Final Fantasy VII")
+            }));
+        }
+
+        [Test]
+        public async Task Recursive_NeverEntersTorrentSaveFolders()
+        {
+            Write("torrents/qbittorrent-games/Game/game.iso");
+            Write("qbit-romarr/Other/other.iso");
+            Write("usenet/Real Game/game.iso");
+
+            Assert.That(await ListRecursive(), Is.EqualTo(new[] { Path.Combine("usenet", "Real Game") }));
+        }
+
+        [Test]
+        public async Task Recursive_PlayStationGameFolder_IsOneGame()
+        {
+            Write("ps/Some Game/eboot.bin");
+            Write("ps/Some Game/sce_sys/param.json", "{}");
+            Write("ps/Some Game/data/a.bin");
+            Assert.That((await new WatchFolderClient(_root, null, recursive: true).GetDownloadsAsync()).Select(d => d.Name), Is.EqualTo(new[] { "Some Game" }));
+        }
+
         [Test]
         public void NeverTakesAGrab()
         {

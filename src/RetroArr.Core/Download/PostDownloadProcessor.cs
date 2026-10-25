@@ -29,6 +29,7 @@ namespace RetroArr.Core.Download
         private readonly TitleCleanerService _titleCleaner;
         private readonly FileRenamer? _fileRenamer;
         private readonly AiTitleService? _ai;
+        private readonly TrashService? _trash;
 
         public PostDownloadProcessor(
             ConfigurationService configService,
@@ -38,9 +39,11 @@ namespace RetroArr.Core.Download
             IArchiveService archiveService,
             TitleCleanerService titleCleaner,
             FileRenamer? fileRenamer = null,
-            AiTitleService? ai = null)
+            AiTitleService? ai = null,
+            TrashService? trash = null)
         {
             _ai = ai;
+            _trash = trash;
             _configService = configService;
             _fileMover = fileMover;
             _gameRepository = gameRepository;
@@ -98,8 +101,8 @@ namespace RetroArr.Core.Download
             if (settings.EnableAutoMove)
             {
                 var result = await AutoMoveToLibrary(download, keep, extracted);
-                if (result.Success && moveAfterImport)
-                    RemoveVerifiedSource(download.DownloadPath!, result.DestinationPath, keep);
+                if (result.Success && moveAfterImport && SourceVerified(download.DownloadPath!, result.DestinationPath, keep))
+                    await RetireSourceAsync(download.DownloadPath!, download.Name);
                 // Extracted files aren't part of the torrent and the library has its own copy by now
                 if (extracted?.Count > 0)
                 {
@@ -1514,9 +1517,22 @@ namespace RetroArr.Core.Download
             client != null && client.DeleteSourceAfterImport
             && client.Implementation.Equals(WatchFolderClient.ImplementationName, StringComparison.OrdinalIgnoreCase);
 
-        // Removes a watch folder's game only when every file in it has a twin of the same size in the library,
+        // A verified source goes to RetroArr's trash (emptied after TrashRetentionDays), or is deleted without one
+        private async System.Threading.Tasks.Task RetireSourceAsync(string source, string title)
+        {
+            if (IsCriticalPath(source)) return;
+            if (_trash == null)
+            {
+                DeleteSource(source, null);
+                return;
+            }
+            try { await _trash.MoveAsync(source, null, title); }
+            catch (Exception ex) { _logger.Warn($"[PostDownload] Could not move {source} to the trash, it stays: {ex.Message}"); }
+        }
+
+        // A watch folder's game may only go when every file in it has a twin of the same size in the library,
         // so a copy cut short or a file the import skipped keeps the whole source
-        internal static bool RemoveVerifiedSource(string source, string? destination, HashSet<string>? skipped)
+        internal static bool SourceVerified(string source, string? destination, HashSet<string>? skipped)
         {
             if (string.IsNullOrEmpty(destination)) return false;
             var libraryFolder = Directory.Exists(destination) ? destination : Path.GetDirectoryName(destination);
@@ -1542,9 +1558,8 @@ namespace RetroArr.Core.Download
                 _logger.Warn($"[PostDownload] Keeping source, {missing.Count} file(s) not verified in {libraryFolder}, e.g. {missing[0]}");
                 return false;
             }
-            _logger.Info($"[PostDownload] All {sourceFiles.Count} file(s) verified in {libraryFolder}, removing source {source}");
-            DeleteSource(source, null);
-            return !File.Exists(source) && !Directory.Exists(source);
+            _logger.Info($"[PostDownload] All {sourceFiles.Count} file(s) verified in {libraryFolder}, retiring source {source}");
+            return true;
         }
 
         // Moves nothing if any file would land on something that isn't ours (only files an earlier

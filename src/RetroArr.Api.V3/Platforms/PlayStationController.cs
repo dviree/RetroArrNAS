@@ -27,7 +27,8 @@ namespace RetroArr.Api.V3.Platforms
             {
                 path = full,
                 format = p.Format.ToString(),
-                compressed = p.IsCompressed,
+                compressed = p.IsCompressed || p.Inside == PlayStationFormat.Lz4Folder || p.Inside == PlayStationFormat.FfpfscImage,
+                inside = p.Format == PlayStationFormat.Archive ? p.Inside.ToString() : null,
                 titleId = p.TitleId,
                 version = p.Version,
                 title = p.Title,

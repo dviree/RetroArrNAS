@@ -193,6 +193,31 @@ namespace RetroArr.Core.Test.Download
         }
 
         [Test]
+        public async Task WatchFolder_InMoveMode_PutsTheSourceInTheTrash_WhenThereIsOne()
+        {
+            var (_, library, source) = await WatchFolderSetup(move: true);
+            var config = new ConfigurationService(_root);
+            var media = config.LoadMediaSettings();
+            media.TrashPath = Path.Combine(_root, "bin");
+            config.SaveMediaSettings(media);
+            var dbOptions = new DbContextOptionsBuilder<RetroArrDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+            var processor = new PostDownloadProcessor(config, new FileMoverService(), new SqliteGameRepository(new TestDbContextFactory(dbOptions)),
+                null!, new ArchiveService(), new TitleCleanerService(), null, null, new TrashService(config));
+            using (var ctx = new RetroArrDbContext(dbOptions))
+            {
+                ctx.Games.Add(new Game { Id = 1, Title = "Test Game", PlatformId = 40, Path = library });
+                await ctx.SaveChangesAsync();
+            }
+
+            var result = await processor.ProcessCompletedDownloadAsync(Torrent(source));
+
+            Assert.That(result.Success, Is.True, result.Reason);
+            Assert.That(Directory.Exists(source), Is.False);
+            var trashed = Directory.GetFiles(Path.Combine(_root, "bin"), "game.iso", SearchOption.AllDirectories);
+            Assert.That(trashed, Has.Length.EqualTo(1), "the source should be in the trash, not deleted");
+        }
+
+        [Test]
         public async Task WatchFolder_WithoutMoveMode_KeepsTheSource()
         {
             var (processor, _, source) = await WatchFolderSetup(move: false);
@@ -239,7 +264,7 @@ namespace RetroArr.Core.Test.Download
             var inside = Directory.CreateDirectory(Path.Combine(source, "library")).FullName;
             File.WriteAllText(Path.Combine(inside, "game.iso"), "x");
 
-            Assert.That(PostDownloadProcessor.RemoveVerifiedSource(source, inside, null), Is.False);
+            Assert.That(PostDownloadProcessor.SourceVerified(source, inside, null), Is.False);
             Assert.That(Directory.Exists(source), Is.True);
         }
 

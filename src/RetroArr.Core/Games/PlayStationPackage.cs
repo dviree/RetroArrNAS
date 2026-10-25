@@ -25,6 +25,9 @@ namespace RetroArr.Core.Games
     /// <summary>What a PS4/PS5 release on disk is, and the title ID, version and name its param.json gives.</summary>
     public sealed record PlayStationPackage(PlayStationFormat Format, string? TitleId, string? Version, string? Title, string? GameFolder)
     {
+        // For an archive: what its table of contents shows inside, read without unpacking anything
+        public PlayStationFormat Inside { get; init; } = PlayStationFormat.Unknown;
+
         public bool IsCompressed => Format is PlayStationFormat.Lz4Folder or PlayStationFormat.FfpfscImage;
     }
 
@@ -60,7 +63,9 @@ namespace RetroArr.Core.Games
                 .Take(2000).ToList();
             foreach (var format in new[] { PlayStationFormat.FfpfscImage, PlayStationFormat.ExfatImage, PlayStationFormat.Pkg, PlayStationFormat.Archive })
             {
-                var hit = files.FirstOrDefault(f => ForFile(f, idFromName).Format == format);
+                // An archive set is read through its first volume
+                var candidates = format == PlayStationFormat.Archive ? files.OrderBy(f => FirstVolumeRank(f)).ToList() : files;
+                var hit = candidates.FirstOrDefault(f => ForFile(f, idFromName).Format == format);
                 if (hit != null)
                     return ForFile(hit, NullIfEmpty(idFromName) ?? TitleIdRegex.Match(Path.GetFileName(hit)).Value.ToUpperInvariant()) with { GameFolder = path };
             }
@@ -79,7 +84,44 @@ namespace RetroArr.Core.Games
                 ".lz4" => PlayStationFormat.Lz4Folder,
                 _ => ArchiveRegex.IsMatch(name) ? PlayStationFormat.Archive : PlayStationFormat.Unknown
             };
-            return new(format, id, null, null, null);
+            if (format != PlayStationFormat.Archive) return new(format, id, null, null, null);
+            var (inside, innerId) = PeekArchive(file);
+            return new(format, id ?? innerId, null, null, null) { Inside = inside };
+        }
+
+        // The entry names in an archive's table of contents, by the same rules as a folder. Nothing is unpacked.
+        internal static (PlayStationFormat Inside, string? TitleId) PeekArchive(string file)
+        {
+            try
+            {
+                using var archive = SharpCompress.Archives.ArchiveFactory.OpenArchive(file);
+                var names = archive.Entries.Select(e => e.Key ?? string.Empty).Take(100000).ToList();
+                var id = names.Select(n => TitleIdRegex.Match(n).Value.ToUpperInvariant()).FirstOrDefault(v => v.Length > 0);
+                bool Any(Func<string, bool> f) => names.Any(n => f(n.Replace('\\', '/')));
+                PlayStationFormat inside;
+                if (Any(n => n.Split('/').Any(p => p.StartsWith("ampr_assets", StringComparison.OrdinalIgnoreCase) || p.Contains("lz4", StringComparison.OrdinalIgnoreCase))))
+                    inside = PlayStationFormat.Lz4Folder;
+                else if (Any(n => n.EndsWith("sce_sys/param.json", StringComparison.OrdinalIgnoreCase)) && Any(n => n.EndsWith("eboot.bin", StringComparison.OrdinalIgnoreCase)))
+                    inside = PlayStationFormat.Folder;
+                else if (Any(n => n.EndsWith(".ffpfsc", StringComparison.OrdinalIgnoreCase))) inside = PlayStationFormat.FfpfscImage;
+                else if (Any(n => n.EndsWith(".exfat", StringComparison.OrdinalIgnoreCase))) inside = PlayStationFormat.ExfatImage;
+                else if (Any(n => n.EndsWith(".pkg", StringComparison.OrdinalIgnoreCase))) inside = PlayStationFormat.Pkg;
+                else inside = PlayStationFormat.Unknown;
+                return (inside, id);
+            }
+            catch (Exception)
+            {
+                // A later volume, a damaged or encrypted archive: its contents stay unknown
+                return (PlayStationFormat.Unknown, null);
+            }
+        }
+
+        private static int FirstVolumeRank(string f)
+        {
+            var n = Path.GetFileName(f).ToLowerInvariant();
+            if (Regex.IsMatch(n, @"\.part0*1\.rar$") || (n.EndsWith(".rar") && !Regex.IsMatch(n, @"\.part\d+\.rar$"))) return 0;
+            if (n.EndsWith(".7z") || n.EndsWith(".zip") || n.EndsWith(".001")) return 1;
+            return 2;
         }
 
         private static bool HasLz4Marker(string folder) =>

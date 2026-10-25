@@ -1,4 +1,6 @@
 using System.IO;
+using System.IO.Compression;
+using System.Linq;
 using NUnit.Framework;
 using RetroArr.Core.Games;
 
@@ -74,6 +76,44 @@ namespace RetroArr.Core.Test.Games
             File.WriteAllText(Path.Combine(dir, "game.exfat"), "x");
             var p = PlayStationPackageInspector.Inspect(dir);
             Assert.That((p.Format, p.TitleId), Is.EqualTo((PlayStationFormat.ExfatImage, "PPSA01903")));
+        }
+
+        private string Zip(string name, params string[] entries)
+        {
+            var file = Path.Combine(_root, name);
+            using var zip = ZipFile.Open(file, ZipArchiveMode.Create);
+            foreach (var e in entries)
+            {
+                using var w = new StreamWriter(zip.CreateEntry(e).Open());
+                w.Write("x");
+            }
+            return file;
+        }
+
+        [TestCase(PlayStationFormat.Lz4Folder, "PPSA12345-app0/eboot.bin", "PPSA12345-app0/ampr_assets_0001.bin")]
+        [TestCase(PlayStationFormat.Folder, "PPSA12345-app0/eboot.bin", "PPSA12345-app0/sce_sys/param.json")]
+        [TestCase(PlayStationFormat.ExfatImage, "Game [PPSA12345].exfat")]
+        public void Archive_TellsWhatIsInside_WithoutUnpacking(PlayStationFormat inside, params string[] entries)
+        {
+            var file = Zip("release.zip", entries);
+            var before = Directory.GetFileSystemEntries(_root).Length;
+
+            var p = PlayStationPackageInspector.Inspect(file);
+
+            Assert.That((p.Format, p.Inside, p.TitleId), Is.EqualTo((PlayStationFormat.Archive, inside, "PPSA12345")));
+            Assert.That(Directory.GetFileSystemEntries(_root).Length, Is.EqualTo(before), "nothing may be unpacked");
+        }
+
+        [Test]
+        public void FolderOfArchives_IsReadThroughTheFirstVolume()
+        {
+            var dir = Directory.CreateDirectory(Path.Combine(_root, "Ghost.of.Yotei.PS5-DUPLEX")).FullName;
+            File.WriteAllText(Path.Combine(dir, "ghost.part02.rar"), "not an archive");
+            var first = Zip(Path.Combine("Ghost.of.Yotei.PS5-DUPLEX", "ghost.zip"), "PPSA12345-app0/eboot.bin", "PPSA12345-app0/sce_sys/param.json");
+
+            var p = PlayStationPackageInspector.Inspect(dir);
+
+            Assert.That((p.Format, p.Inside), Is.EqualTo((PlayStationFormat.Archive, PlayStationFormat.Folder)));
         }
 
         [TestCase("v02.002.002", "01.010.000", 1)]

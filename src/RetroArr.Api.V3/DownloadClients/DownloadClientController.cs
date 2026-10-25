@@ -100,6 +100,7 @@ namespace RetroArr.Api.V3.DownloadClients
             existingClient.Enable = client.Enable;
             existingClient.Priority = client.Priority;
             existingClient.DeleteSourceAfterImport = client.DeleteSourceAfterImport;
+            existingClient.Recursive = client.Recursive;
             existingClient.RemotePathMapping = client.RemotePathMapping;
             existingClient.LocalPathMapping = client.LocalPathMapping;
 
@@ -173,7 +174,7 @@ namespace RetroArr.Api.V3.DownloadClients
                     }
                     else if (config.Implementation.Equals(WatchFolderClient.ImplementationName, StringComparison.OrdinalIgnoreCase))
                     {
-                        client = new WatchFolderClient(config.Host, config.Category);
+                        client = new WatchFolderClient(config.Host, config.Category, config.Recursive);
                     }
 
                     if (client != null)
@@ -425,7 +426,7 @@ namespace RetroArr.Api.V3.DownloadClients
             if (config.Implementation.Equals("Deluge", StringComparison.OrdinalIgnoreCase))
                 return new DelugeClient(config.Host, config.Port, config.Password ?? "", config.UseSsl, category);
             if (config.Implementation.Equals(WatchFolderClient.ImplementationName, StringComparison.OrdinalIgnoreCase))
-                return new WatchFolderClient(config.Host, category);
+                return new WatchFolderClient(config.Host, category, config.Recursive);
             return null;
         }
 
