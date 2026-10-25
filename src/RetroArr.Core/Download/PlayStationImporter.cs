@@ -59,6 +59,9 @@ namespace RetroArr.Core.Download
         public static bool ImportFolders =>
             !string.Equals(Environment.GetEnvironmentVariable("PS_IMPORT_FOLDERS"), "false", StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>The subfolder of roms/ps5 (and ps4) that fake PKGs go to, PS_PKG_FOLDER, default "pkg".</summary>
+        public static string PkgFolder => Environment.GetEnvironmentVariable("PS_PKG_FOLDER") is { Length: > 0 } f ? f : "pkg";
+
         public static bool IsPlayStation(string? platformFolder) =>
             string.Equals(platformFolder, "ps5", StringComparison.OrdinalIgnoreCase) || string.Equals(platformFolder, "ps4", StringComparison.OrdinalIgnoreCase);
 
@@ -168,9 +171,11 @@ namespace RetroArr.Core.Download
                 if (images > 1) return Outcome.Fail($"{images} {ext} files in one folder: add the folder as a recursive watch so each is its own game");
             }
 
-            var folder = Path.Combine(libraryRoot, platformFolder);
+            // Fake PKGs get a folder of their own (roms/ps5/pkg); everything else lies in roms/ps5
+            var platformPath = Path.Combine(libraryRoot, platformFolder);
+            var folder = package.Format == PlayStationFormat.Pkg ? Path.Combine(platformPath, PkgFolder) : platformPath;
             Directory.CreateDirectory(folder);
-            var title = await TitleForAsync(package, source, releaseName, from, folder);
+            var title = await TitleForAsync(package, source, releaseName, from, platformPath);
             var extension = isFolderGame ? string.Empty : Path.GetExtension(from).ToLowerInvariant();
             var name = BuildName(title, package, extension);
             var target = Path.Combine(folder, name);
@@ -195,7 +200,7 @@ namespace RetroArr.Core.Download
                 if (kind == package.Format && kind != PlayStationFormat.Lz4Folder) older.Add(existing);
             }
             // The other PlayStation libraries (the LZ4 one) and folders one level down are only looked at, never changed
-            var elsewhere = InOtherLibraries(package, folder).FirstOrDefault(e => !older.Contains(e) && !IsOlder(e, package.Version));
+            var elsewhere = InOtherLibraries(package, platformPath).FirstOrDefault(e => !older.Contains(e) && !IsOlder(e, package.Version));
             if (elsewhere != null)
             {
                 _logger.Info($"[PlayStation] {releaseName} is already in {elsewhere}, not added");

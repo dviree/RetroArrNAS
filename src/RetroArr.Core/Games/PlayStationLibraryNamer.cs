@@ -76,6 +76,7 @@ namespace RetroArr.Core.Games
             var done = new List<(string, string)>();
             foreach (var folder in Folders().Where(Directory.Exists))
             {
+                MovePkgsIntoTheirFolder(folder, done);
                 List<string> entries;
                 try { entries = Directory.EnumerateFileSystemEntries(folder).ToList(); }
                 catch (Exception ex) { _logger.Warn($"[PSNames] Cannot read {folder}: {ex.Message}"); continue; }
@@ -101,6 +102,28 @@ namespace RetroArr.Core.Games
             }
             if (done.Count > 0) Remember(done);
             return done;
+        }
+
+        // Loose PKGs in roms/ps5 go into roms/ps5/pkg, under the same name
+        private void MovePkgsIntoTheirFolder(string folder, List<(string, string)> done)
+        {
+            if (Path.GetFileName(folder).Equals(PlayStationImporter.PkgFolder, StringComparison.OrdinalIgnoreCase)) return;
+            List<string> pkgs;
+            try { pkgs = Directory.EnumerateFiles(folder, "*.pkg").Where(f => !Path.GetFileName(f).StartsWith('.')).ToList(); }
+            catch (Exception) { return; }
+            foreach (var pkg in pkgs.Where(p => !RecentlyWritten(p)))
+            {
+                var to = Path.Combine(folder, PlayStationImporter.PkgFolder, Path.GetFileName(pkg));
+                if (File.Exists(to)) continue;
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(to)!);
+                    Rename(pkg, to);
+                    done.Add((pkg, to));
+                    _logger.Info($"[PSNames] Moved {pkg} into {Path.GetDirectoryName(to)}");
+                }
+                catch (Exception ex) { _logger.Warn($"[PSNames] Could not move {pkg}: {ex.Message}"); }
+            }
         }
 
         /// <summary>A name that is nothing but a title ID and format words: "PPSA26344-app0-lz4", "_PPSA03671_", "CUSA00900.pkg".</summary>
