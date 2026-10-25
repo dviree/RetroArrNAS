@@ -111,7 +111,13 @@ namespace RetroArr.Core.IO
             else
             {
                 // Unix (Linux/macOS)
-                return Link(source, destination) == 0;
+                if (Link(source, destination) == 0) return true;
+                // Two Docker mounts of the same disk: link through the one mount that holds both
+                var (s, d) = (SharedMount.Translate(source), SharedMount.Translate(destination));
+                if (s == null || d == null) return false;
+                if (Link(s, d) != 0) return false;
+                _logger.Info($"[FileMover] Linked through {SharedMount.Root}: {d} -> {s}");
+                return true;
             }
         }
 

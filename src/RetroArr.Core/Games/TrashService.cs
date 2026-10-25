@@ -277,6 +277,18 @@ namespace RetroArr.Core.Games
                 // another volume; anything else refuses the move with its error
             }
 
+            // Another Docker mount of the same disk: rename through the one mount that holds both, no copy
+            var (sharedSrc, sharedDst) = (IO.SharedMount.Translate(src), IO.SharedMount.Translate(dst));
+            if (sharedSrc != null && sharedDst != null)
+            {
+                try
+                {
+                    Rename(sharedSrc, sharedDst);
+                    return;
+                }
+                catch (IOException ex) when (IsCrossDevice(ex, sharedSrc, sharedDst)) { }
+            }
+
             var need = TryMeasure(src);
             var dir = Path.GetDirectoryName(Path.GetFullPath(dst))!;
             long free;
