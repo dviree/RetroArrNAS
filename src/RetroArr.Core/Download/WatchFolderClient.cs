@@ -75,7 +75,9 @@ namespace RetroArr.Core.Download
         {
             ".txt", ".nfo", ".url", ".jpg", ".jpeg", ".png", ".gif", ".webp", ".sfv", ".md5", ".sha1", ".db", ".ini", ".log", ".xml", ".par2", ".torrent",
             // web pages a download manager saved next to the files
-            ".js", ".css", ".html", ".htm", ".php", ".min", ".map"
+            ".js", ".css", ".html", ".htm", ".php", ".min", ".map",
+            // archive.org item metadata
+            ".sqlite", ".sqlite3"
         };
 
         // A folder holding this file is never looked into: a set kept as it is, a folder someone else manages

@@ -274,6 +274,9 @@ namespace RetroArr.Core.Test.Download
             Write("api/api.js");
             Write("beacon.min");
             Write("custom-F_ZXKHX.js");
+            Write("rrbs/retro-roms-best-set_meta.sqlite");
+            Write("rrbs/retro-roms-best-set_meta.xml");
+            Write("rrbs/__ia_thumb.jpg");
             Write("Real Game/game.iso");
 
             Assert.That((await List()).Select(d => d.Name), Is.EqualTo(new[] { "Real Game" }));
