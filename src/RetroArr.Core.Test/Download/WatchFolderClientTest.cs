@@ -114,6 +114,23 @@ namespace RetroArr.Core.Test.Download
         }
 
         [Test]
+        public async Task FolderItMayNotList_FailsTheConnectionTest()
+        {
+            if (OperatingSystem.IsWindows() || Environment.UserName == "root")
+                Assert.Ignore("root reads any folder; the mode only stops other users");
+            var locked = Directory.CreateDirectory(Path.Combine(_root, "locked")).FullName;
+            File.SetUnixFileMode(locked, UnixFileMode.UserWrite);
+            try
+            {
+                Assert.That(await new WatchFolderClient(locked).TestConnectionAsync(), Is.False);
+            }
+            finally
+            {
+                File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+        }
+
+        [Test]
         public async Task SameFolder_KeepsItsId()
         {
             Write("Advance Wars.gba");

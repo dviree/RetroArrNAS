@@ -62,9 +62,24 @@ namespace RetroArr.Core.Download
             _category = category;
         }
 
-        public Task<bool> TestConnectionAsync() => Task.FromResult(Directory.Exists(_folder));
+        public Task<bool> TestConnectionAsync() => Task.FromResult(Readable(_folder));
 
-        public Task<string> GetVersionAsync() => Task.FromResult(Directory.Exists(_folder) ? "folder" : string.Empty);
+        public Task<string> GetVersionAsync() => Task.FromResult(Readable(_folder) ? "folder" : string.Empty);
+
+        // A folder RetroArr may not list (made by root with mode 700) exists, yet every poll would fail on it
+        private static bool Readable(string folder)
+        {
+            try
+            {
+                using var entries = Directory.EnumerateFileSystemEntries(folder).GetEnumerator();
+                entries.MoveNext();
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return false;
+            }
+        }
 
         public Task<bool> AddTorrentAsync(string url, string? category = null) =>
             throw new NotSupportedException("A watch folder downloads nothing. Configure qBittorrent, Transmission or Deluge for torrents.");
