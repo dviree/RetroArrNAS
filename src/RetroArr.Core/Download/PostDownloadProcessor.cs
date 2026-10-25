@@ -288,7 +288,7 @@ namespace RetroArr.Core.Download
                 var searchResults = await metadataService.SearchGamesAsync(cleanName);
                 if (searchResults.Any())
                 {
-                    containerName = SanitizeFileName(searchResults.First().Title);
+                    containerName = SanitizeFileName(BestMatch(searchResults, cleanName).Title);
                     shouldNest = true;
                     _logger.Info($"[PostDownload] Resolved game name: '{download.Name}' -> '{containerName}'");
                 }
@@ -827,7 +827,7 @@ namespace RetroArr.Core.Download
 
                 if (searchResults.Any())
                 {
-                    game = await metadataService.GetGameMetadataAsync(searchResults.First().IgdbId!.Value);
+                    game = await metadataService.GetGameMetadataAsync(BestMatch(searchResults, cleanTitle).IgdbId!.Value);
                 }
 
                 bool unresolvedPlatform = platformId == Games.PlatformDefinitions.UnknownPlatformId;
@@ -891,6 +891,15 @@ namespace RetroArr.Core.Download
             var match = Games.PlatformDefinitions.AllPlatforms
                 .FirstOrDefault(p => p.MatchesFolderName(platformFolder));
             return match?.Id ?? Games.PlatformDefinitions.UnknownPlatformId;
+        }
+
+        // The search ranks a bundle or an edition before the game itself at times ("Super Mario Galaxy + Super Mario
+        // Galaxy 2" for "Super Mario Galaxy 2"), so a result named exactly as the release wins over the first one
+        internal static Game BestMatch(List<Game> results, string query)
+        {
+            static string Key(string? s) => new string((s ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+            var key = Key(query);
+            return results.FirstOrDefault(r => key.Length > 0 && Key(r.Title) == key) ?? results.First();
         }
 
         internal string CleanReleaseName(string input)
