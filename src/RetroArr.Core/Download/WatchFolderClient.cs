@@ -73,8 +73,13 @@ namespace RetroArr.Core.Download
         // Files that say nothing about whether a folder is a game
         private static readonly HashSet<string> JunkExtensions = new(StringComparer.OrdinalIgnoreCase)
         {
-            ".txt", ".nfo", ".url", ".jpg", ".jpeg", ".png", ".gif", ".webp", ".sfv", ".md5", ".sha1", ".db", ".ini", ".log", ".xml", ".par2", ".torrent"
+            ".txt", ".nfo", ".url", ".jpg", ".jpeg", ".png", ".gif", ".webp", ".sfv", ".md5", ".sha1", ".db", ".ini", ".log", ".xml", ".par2", ".torrent",
+            // web pages a download manager saved next to the files
+            ".js", ".css", ".html", ".htm", ".php", ".min", ".map"
         };
+
+        // A folder holding this file is never looked into: a set kept as it is, a folder someone else manages
+        internal const string IgnoreMarker = ".retroarr-ignore";
 
         // Films, series and music that end up in a download folder too: never a game, and never taken
         private static readonly HashSet<string> MediaExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -143,7 +148,8 @@ namespace RetroArr.Core.Download
 
             var entries = _recursive
                 ? Units(new DirectoryInfo(_folder), 0)
-                : new DirectoryInfo(_folder).EnumerateFileSystemInfos().Where(e => !e.Name.StartsWith('.'));
+                : new DirectoryInfo(_folder).EnumerateFileSystemInfos().Where(e => !e.Name.StartsWith('.')
+                    && !(e is DirectoryInfo d && File.Exists(Path.Combine(d.FullName, IgnoreMarker))));
             foreach (var entry in entries)
             {
                 try
@@ -241,7 +247,7 @@ namespace RetroArr.Core.Download
                     continue;
                 }
                 var sub = (DirectoryInfo)entry;
-                if (TorrentFolders.Contains(sub.Name) || NeverGames.Contains(sub.Name)) continue;
+                if (TorrentFolders.Contains(sub.Name) || NeverGames.Contains(sub.Name) || File.Exists(Path.Combine(sub.FullName, IgnoreMarker))) continue;
                 // A game is taken whole; a collection or a ROM set is looked into, where loose ROMs are one game each
                 if (Classify(sub, depth) == Kind.Game) yield return sub;
                 else foreach (var unit in Units(sub, depth + 1)) yield return unit;

@@ -267,6 +267,20 @@ namespace RetroArr.Core.Test.Download
         }
 
         [Test]
+        public async Task IgnoredFoldersAndSavedWebPages_AreNeverGames()
+        {
+            Write("retro-roms-best-set/NES/Contra (USA).zip");
+            Write("retro-roms-best-set/.retroarr-ignore", "");
+            Write("api/api.js");
+            Write("beacon.min");
+            Write("custom-F_ZXKHX.js");
+            Write("Real Game/game.iso");
+
+            Assert.That((await List()).Select(d => d.Name), Is.EqualTo(new[] { "Real Game" }));
+            Assert.That(await ListRecursive(), Is.EqualTo(new[] { "Real Game" }));
+        }
+
+        [Test]
         public void NeverTakesAGrab()
         {
             var client = new WatchFolderClient(_root);
