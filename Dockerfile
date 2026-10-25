@@ -86,6 +86,21 @@ RUN case "$TARGETARCH" in \
     ) || echo "[epicprefill] WARN: download failed at build time; Epic prefill will be unavailable"
 
 # Stage 1: Build the Frontend (React)
+# Stage: NSC_Builder (MIT) for merging a Switch game's base, update and DLC into one NSP (SwitchMergeService).
+# Pinned to a commit; only its Python tools are kept. Non-fatal: without it the merge service stays off.
+FROM alpine:3.19 AS nscb
+ARG NSCB_COMMIT=e9083e83383281bdd9e167d3141163dcc56b6710
+RUN apk add --no-cache git && mkdir -p /nscb && \
+    ( git init -q /tmp/nscb-src \
+      && git -C /tmp/nscb-src fetch -q --depth 1 https://github.com/julesontheroad/NSC_BUILDER "${NSCB_COMMIT}" \
+      && git -C /tmp/nscb-src checkout -q FETCH_HEAD \
+      && cp -r /tmp/nscb-src/py/ztools/. /nscb/ \
+      && cp /tmp/nscb-src/LICENSE /nscb/LICENSE \
+      && rm -rf /nscb/bin /nscb/*.bat /tmp/nscb-src \
+      && printf 'from PIL.Image import *  # NSC_Builder imports Pillow under its old name\n' > /nscb/lib/Image.py \
+      && printf 'class Translator:  # title translation is never used here\n    def translate(self, *args, **kwargs):\n        raise RuntimeError("translation is not available")\n' > /nscb/lib/googletrans.py \
+    ) || echo "[nscb] WARN: download failed at build time; Switch merging stays off until the image is rebuilt"
+
 FROM node:22 AS frontend
 WORKDIR /src
 COPY package.json package-lock.json ./
@@ -151,8 +166,8 @@ RUN apt-get update && apt-get install -y \
     openssl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install pyusb
-RUN pip3 install --break-system-packages pyusb
+# Install pyusb, and what NSC_Builder needs to merge and verify Switch games
+RUN pip3 install --break-system-packages pyusb pycryptodome zstandard tqdm unidecode colorama chardet urllib3 requests beautifulsoup4 pillow pykakasi
 
 COPY --from=backend /app/publish .
 
@@ -174,6 +189,9 @@ COPY --from=emulatorjs /emulatorjs/data /app/config/emulatorjs
 COPY --from=steamprefill /steamprefill /opt/steamprefill
 COPY --from=battlenetprefill /battlenetprefill /opt/battlenetprefill
 COPY --from=epicprefill /epicprefill /opt/epicprefill
+COPY --from=nscb /nscb /opt/nscb
+# SwitchMergeService writes the keys file there before a merge (NSC_Builder reads keys.txt next to itself)
+RUN chmod -R a+rwX /opt/nscb
 
 # Entrypoint script handles self-signed cert generation + dual-listener config
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh

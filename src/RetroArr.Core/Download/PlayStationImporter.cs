@@ -199,7 +199,7 @@ namespace RetroArr.Core.Download
                 older.Add(existing);
             }
             // The other PlayStation libraries (the LZ4 one) are only looked at, never changed
-            var elsewhere = InOtherLibraries(package).FirstOrDefault(e => PlayStationPackageInspector.CompareVersions(VersionIn(Path.GetFileName(e)) ?? VersionInName(Path.GetFileName(e)), package.Version) >= 0);
+            var elsewhere = InOtherLibraries(package, folder).Where(e => !older.Contains(e)).FirstOrDefault(e => PlayStationPackageInspector.CompareVersions(VersionIn(Path.GetFileName(e)) ?? VersionInName(Path.GetFileName(e)), package.Version) >= 0);
             if (elsewhere != null)
             {
                 _logger.Info($"[PlayStation] {releaseName} is already in {elsewhere}, not copied");
@@ -319,10 +319,11 @@ namespace RetroArr.Core.Download
             (Environment.GetEnvironmentVariable("PS_LIBRARY_EXTRA") ?? string.Empty)
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 
-        private static IEnumerable<string> InOtherLibraries(PlayStationPackage package)
+        // main: the library's own platform folder, looked into one level down too (roms/ps5/_extracted/...)
+        private static IEnumerable<string> InOtherLibraries(PlayStationPackage package, string? main = null)
         {
             if (package.TitleId == null || package.Content == PlayStationContent.Dlc) yield break;
-            foreach (var library in OtherLibraries.Where(Directory.Exists))
+            foreach (var library in OtherLibraries.Append(main).OfType<string>().Where(Directory.Exists))
             {
                 List<string> entries;
                 try
@@ -354,7 +355,7 @@ namespace RetroArr.Core.Download
             if (package.TitleId == null || package.Content != PlayStationContent.Game) return null;
             var version = package.Version ?? VersionInName(releaseName);
             var here = Directory.Exists(folder) ? SameGame(folder, package, string.Empty) : Enumerable.Empty<string>();
-            return here.Concat(InOtherLibraries(package))
+            return here.Concat(InOtherLibraries(package, Directory.Exists(folder) ? folder : null))
                 .FirstOrDefault(e => PlayStationPackageInspector.CompareVersions(VersionIn(Path.GetFileName(e)) ?? VersionInName(Path.GetFileName(e)), version) >= 0);
         }
 
