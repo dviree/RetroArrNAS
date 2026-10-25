@@ -139,13 +139,39 @@ namespace RetroArr.Core.Download
         public Task<bool> PauseDownloadAsync(string id) => Task.FromResult(false);
         public Task<bool> ResumeDownloadAsync(string id) => Task.FromResult(false);
 
-        public Task<List<DownloadStatus>> GetDownloadsAsync()
+        // The monitor and the queue page both list every watch folder; one scan serves both for a short while,
+        // and a second caller waits for the scan already running instead of starting its own
+        internal static TimeSpan ListCacheTime = TimeSpan.FromSeconds(30);
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime At, List<DownloadStatus> Downloads)> _listed = new();
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, object> _scanLocks = new();
+
+        public Task<List<DownloadStatus>> GetDownloadsAsync() => Task.Run(() =>
+        {
+            var key = $"{_folder}|{_recursive}|{_category}";
+            lock (_scanLocks.GetOrAdd(key, _ => new object()))
+            {
+                if (_listed.TryGetValue(key, out var hit) && DateTime.UtcNow - hit.At < ListCacheTime)
+                    return hit.Downloads.Select(Copy).ToList();
+                var downloads = Scan();
+                _listed[key] = (DateTime.UtcNow, downloads);
+                return downloads.Select(Copy).ToList();
+            }
+        });
+
+        // Callers fill in client fields on what they get, so each gets its own objects
+        private static DownloadStatus Copy(DownloadStatus d) => new()
+        {
+            Id = d.Id, Name = d.Name, Size = d.Size, Progress = d.Progress, State = d.State, Category = d.Category,
+            DownloadPath = d.DownloadPath, PlatformFolder = d.PlatformFolder, StatusMessages = d.StatusMessages.ToList()
+        };
+
+        private List<DownloadStatus> Scan()
         {
             var result = new List<DownloadStatus>();
             if (!Directory.Exists(_folder))
             {
                 _logger.Warn($"[WatchFolder] {_folder} does not exist or is not mounted");
-                return Task.FromResult(result);
+                return result;
             }
 
             var entries = _recursive
@@ -164,7 +190,7 @@ namespace RetroArr.Core.Download
                     _logger.Warn($"[WatchFolder] Skipping {entry.FullName}: {ex.Message}");
                 }
             }
-            return Task.FromResult(result);
+            return result;
         }
 
         private DownloadStatus? Describe(FileSystemInfo entry)
@@ -197,9 +223,23 @@ namespace RetroArr.Core.Download
             };
         }
 
+        // Reading archive contents and image headers is slow on 100 GB releases; a release is inspected again only
+        // when its files change. Every poll of every watch folder would otherwise do it again.
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (long Signature, Games.PlayStationPackage Package)> _inspected = new();
+
+        private static Games.PlayStationPackage InspectCached(string path, List<FileInfo> files)
+        {
+            var signature = HashCode.Combine(files.Count, files.Sum(f => f.Length), files.Max(f => f.LastWriteTimeUtc.Ticks));
+            if (_inspected.TryGetValue(path, out var known) && known.Signature == signature) return known.Package;
+            var package = Games.PlayStationPackageInspector.Inspect(path);
+            if (_inspected.Count > 5000) _inspected.Clear();
+            _inspected[path] = (signature, package);
+            return package;
+        }
+
         private DownloadStatus DescribePlayStation(FileSystemInfo entry, List<FileInfo> files, string platform)
         {
-            var package = Games.PlayStationPackageInspector.Inspect(entry.FullName);
+            var package = InspectCached(entry.FullName, files);
             var what = $"{platform.ToUpperInvariant()} {Describe(package)}";
             string? held = package.Format switch
             {

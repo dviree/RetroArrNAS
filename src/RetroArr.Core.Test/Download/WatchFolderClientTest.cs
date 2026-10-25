@@ -21,12 +21,17 @@ namespace RetroArr.Core.Test.Download
             _root = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "retroarr_watch_" + Path.GetRandomFileName())).FullName;
             _settle = WatchFolderClient.SettleTime;
             WatchFolderClient.SettleTime = TimeSpan.FromMinutes(2);
+            _listCache = WatchFolderClient.ListCacheTime;
+            WatchFolderClient.ListCacheTime = TimeSpan.Zero;
         }
+
+        private TimeSpan _listCache;
 
         [TearDown]
         public void TearDown()
         {
             WatchFolderClient.SettleTime = _settle;
+            WatchFolderClient.ListCacheTime = _listCache;
             if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
         }
 
@@ -280,6 +285,19 @@ namespace RetroArr.Core.Test.Download
 
             Assert.That((await List()).Select(d => d.Name), Is.EqualTo(new[] { "Real Game" }));
             Assert.That(await ListRecursive(), Is.EqualTo(new[] { "Real Game" }));
+        }
+
+        [Test]
+        public async Task ListingTwiceInARow_ScansOnce_ButHandsOutSeparateObjects()
+        {
+            WatchFolderClient.ListCacheTime = TimeSpan.FromMinutes(1);
+            Write("Advance Wars.gba");
+            var first = (await List()).Single();
+            Write("Metroid.gba");
+            first.ClientId = 7;
+            var second = await List();
+            Assert.That(second, Has.Count.EqualTo(1), "served from the scan a moment ago");
+            Assert.That(second.Single().ClientId, Is.EqualTo(0), "a caller's changes never reach another caller");
         }
 
         [Test]
