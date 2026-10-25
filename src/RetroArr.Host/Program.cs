@@ -246,6 +246,7 @@ namespace RetroArr.Host
             builder.Services.AddSingleton<TrashService>();
             builder.Services.AddHostedService<TrashPurgeService>();
             builder.Services.AddHostedService<SwitchMergeService>();
+            builder.Services.AddHostedService<PlayStationLibraryNamer>();
             builder.Services.AddHostedService<ContentStateUpgradeService>();
 
             // SignalR progress hub + notifier

@@ -26,7 +26,7 @@ namespace RetroArr.Core.Test.Games
             _verdict = "VERDICT: NSP FILE IS CORRECT\nVERDICT: NSP FILE IS SAFE";
             _mergedName = "The Legend of Zelda: Tears of the Kingdom [0100F2C0115B6000][v393216] (1G+1U+1D).nsp";
             _root = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "retroarr_switchmerge_" + Path.GetRandomFileName())).FullName;
-            var config = new ConfigurationService(Path.Combine(_root, "config"));
+            var config = new ConfigurationService(Directory.CreateDirectory(Path.Combine(_root, "config")).Parent!.FullName);
             var media = config.LoadMediaSettings();
             media.FolderPath = Path.Combine(_root, "roms");
             media.DestinationPath = Path.Combine(_root, "roms");

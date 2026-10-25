@@ -26,7 +26,7 @@ namespace RetroArr.Core.Test.Download
             _root = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "retroarr_psimport_" + Path.GetRandomFileName())).FullName;
             _library = Directory.CreateDirectory(Path.Combine(_root, "roms")).FullName;
             _inbox = Directory.CreateDirectory(Path.Combine(_root, "jdownloader")).FullName;
-            var config = new ConfigurationService(Path.Combine(_root, "config"));
+            var config = new ConfigurationService(Directory.CreateDirectory(Path.Combine(_root, "config")).Parent!.FullName);
             var media = config.LoadMediaSettings();
             media.TrashPath = Path.Combine(_root, "bin");
             config.SaveMediaSettings(media);
