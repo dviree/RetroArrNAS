@@ -44,6 +44,7 @@ namespace RetroArr.Core.Games
 
         private readonly ConfigurationService _config;
         private readonly TrashService _trash;
+        private readonly IGameRepository? _games;
 
         internal string Nscb = Environment.GetEnvironmentVariable("SWITCH_NSCB") ?? "/opt/nscb/squirrel.py";
         internal string KeysFile = Environment.GetEnvironmentVariable("SWITCH_KEYS_FILE") ?? "/app/config/switch/prod.keys";
@@ -57,11 +58,14 @@ namespace RetroArr.Core.Games
         internal Func<string[], string, TimeSpan, CancellationToken, Task<(int Code, string Output)>> Run = RunProcessAsync;
         internal Func<string, long> FreeSpace = path => new DriveInfo(path).AvailableFreeSpace;
 
-        public SwitchMergeService(ConfigurationService config, TrashService trash)
+        public SwitchMergeService(ConfigurationService config, TrashService trash, IGameRepository? games = null)
         {
             _config = config;
             _trash = trash;
+            _games = games;
         }
+
+        internal string? LastError { get; private set; }
 
         public bool IsEnabled => File.Exists(Nscb) && File.Exists(KeysFile);
 
@@ -110,6 +114,7 @@ namespace RetroArr.Core.Games
                 else
                 {
                     _logger.Warn($"[SwitchMerge] {Path.GetFileName(family.Base.Path)}: {error}");
+                    LastError = error;
                     state[family.Fingerprint] = DateTime.UtcNow;
                 }
                 SaveState(state);
@@ -196,7 +201,8 @@ namespace RetroArr.Core.Games
                 if (verifyCode != 0 || verdict != null) return $"verification failed: {verdict ?? $"exit {verifyCode}"}";
 
                 var folder = Path.GetDirectoryName(family.Base.Path)!;
-                var target = Path.Combine(folder, PublishName(family));
+                // NSC_Builder names its output from the game's own control data (NACP): the official title
+                var target = Path.Combine(folder, PublishName(family, Path.GetFileName(mergedFile)));
                 if (File.Exists(target) && !inputs.Any(p => SamePath(p.Path, target))) return $"{Path.GetFileName(target)} is already there";
                 var partial = Path.Combine(folder, ".retroarr-merge-" + Guid.NewGuid().ToString("N")[..8] + ".nsp");
                 File.Copy(mergedFile, partial);
@@ -213,6 +219,7 @@ namespace RetroArr.Core.Games
                     }
                 }
                 File.Move(partial, target);
+                await PointLibraryAtAsync(inputs.Concat(family.Superseded).Select(p => p.Path), target);
                 RemoveEmptyFolders(inputs.Concat(family.Superseded).Select(p => Path.GetDirectoryName(p.Path)!), Path.GetDirectoryName(folder)!);
                 _logger.Info($"[SwitchMerge] Published {target}; {inputs.Count + family.Superseded.Count} parts to the trash");
                 return null;
@@ -232,14 +239,33 @@ namespace RetroArr.Core.Games
             return verdicts.FirstOrDefault(v => !Regex.IsMatch(v, @"^VERDICT:\s+(NSP|XCI|NCA)\s+FILE\s+IS\s+(CORRECT|SAFE)$", RegexOptions.IgnoreCase));
         }
 
-        /// <summary>"Title [0100ABCD12340000][v131072].nsp": the base's title, the base ID, the update's version.</summary>
-        internal static string PublishName(Family family)
+        /// <summary>
+        /// "Title [0100ABCD12340000][v131072].nsp": the title NSC_Builder read from the game itself (else the base file's),
+        /// the base ID, the update's version.
+        /// </summary>
+        internal static string PublishName(Family family, string? mergedName = null)
         {
-            var baseName = Path.GetFileNameWithoutExtension(family.Base.Path);
-            var title = Regex.Replace(baseName, @"\s*[\[\(][^\]\)]*[\]\)]", "").Trim();
+            static string TitleOf(string? name) =>
+                Regex.Replace(Regex.Replace(Path.GetFileNameWithoutExtension(name ?? string.Empty), @"\s*[\[\(][^\]\)]*[\]\)]", ""), @"[:/\\?*""<>|]", " ")
+                    .Replace("  ", " ").Trim(' ', '.', '-');
+            var title = TitleOf(mergedName);
+            if (!title.Any(char.IsLetter) || Regex.IsMatch(title, @"^[0-9A-Fa-f]{16}$")) title = TitleOf(family.Base.Path);
             if (title.Length == 0) title = $"{family.BaseId:X16}";
             var version = family.Update?.Version ?? family.Base.Version;
             return $"{title} [{family.BaseId:X16}][v{version}].nsp";
+        }
+
+        // The library entry that pointed at the base (or another part) now points at the merged file
+        private async Task PointLibraryAtAsync(IEnumerable<string> oldPaths, string target)
+        {
+            if (_games == null) return;
+            try
+            {
+                var old = new HashSet<string>(oldPaths, StringComparer.Ordinal);
+                foreach (var game in (await _games.GetAllLightAsync()).Where(g => g.ExecutablePath != null && old.Contains(g.ExecutablePath)))
+                    await _games.UpdateFieldsAsync(game.Id, g => g.ExecutablePath = target);
+            }
+            catch (Exception ex) { _logger.Warn($"[SwitchMerge] {target} is published, but the library list is not updated yet (the next scan does it): {ex.Message}"); }
         }
 
         private static void RemoveEmptyFolders(IEnumerable<string> folders, string stopAt)

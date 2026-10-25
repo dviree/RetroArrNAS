@@ -17,11 +17,14 @@ namespace RetroArr.Core.Test.Games
         private string _switch = null!;
         private SwitchMergeService _service = null!;
         private readonly List<string[]> _calls = new();
+        private string _mergedName = "The Legend of Zelda: Tears of the Kingdom [0100F2C0115B6000][v393216] (1G+1U+1D).nsp";
         private string _verdict = "VERDICT: NSP FILE IS CORRECT\nVERDICT: NSP FILE IS SAFE";
 
         [SetUp]
         public void SetUp()
         {
+            _verdict = "VERDICT: NSP FILE IS CORRECT\nVERDICT: NSP FILE IS SAFE";
+            _mergedName = "The Legend of Zelda: Tears of the Kingdom [0100F2C0115B6000][v393216] (1G+1U+1D).nsp";
             _root = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "retroarr_switchmerge_" + Path.GetRandomFileName())).FullName;
             var config = new ConfigurationService(Path.Combine(_root, "config"));
             var media = config.LoadMediaSettings();
@@ -50,7 +53,7 @@ namespace RetroArr.Core.Test.Games
                 {
                     var output = args[Array.IndexOf(args, "-o") + 1];
                     var inputs = File.ReadAllLines(args[Array.IndexOf(args, "-tfile") + 1]);
-                    File.WriteAllBytes(Path.Combine(output, "merged (1G+1U+1D).nsp"), inputs.SelectMany(File.ReadAllBytes).ToArray());
+                    File.WriteAllBytes(Path.Combine(output, _mergedName), inputs.SelectMany(File.ReadAllBytes).ToArray());
                     return Task.FromResult((0, "done"));
                 }
                 return Task.FromResult((0, _verdict));
@@ -83,7 +86,8 @@ namespace RetroArr.Core.Test.Games
             Assert.That(await _service.RunOnceAsync(), Is.EqualTo(1));
 
             var left = Directory.EnumerateFiles(_switch, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(_switch, f)).ToList();
-            Assert.That(left, Is.EqualTo(new[] { Path.Combine("Zelda", "Zelda [0100F2C0115B6000][v393216].nsp") }));
+            Assert.That(left, Is.EqualTo(new[] { Path.Combine("Zelda", "The Legend of Zelda Tears of the Kingdom [0100F2C0115B6000][v393216].nsp") }),
+                "the official title NSC_Builder read from the game");
             Assert.That(new FileInfo(Path.Combine(_switch, left[0])).Length, Is.EqualTo(135), "base + newest update + DLC");
             Assert.That(Directory.EnumerateFiles(Path.Combine(_root, "bin"), "*.nsp", SearchOption.AllDirectories).Count(), Is.EqualTo(4), "every part, the old update too");
             Assert.That(_calls.Single(c => c.Contains("-v")), Does.Contain("lv3"));
@@ -143,6 +147,16 @@ namespace RetroArr.Core.Test.Games
         public void TitleIds_BelongToTheirBase(ulong id, ulong baseId)
         {
             Assert.That(new SwitchMergeService.Part("x", id, 0, 1).BaseId, Is.EqualTo(baseId));
+        }
+
+        [Test]
+        public async Task WithoutATitleFromTheGame_TheBaseFileNameIsUsed()
+        {
+            _mergedName = "0100000000010000 [0100000000010000][v65536] (1G+1U).nsp";
+            Part("Mario Kart 8 Deluxe [0100000000010000][v0].nsp", 50);
+            Part("Mario Kart 8 Deluxe [0100000000010800][v65536].nsp", 10);
+            Assert.That(await _service.RunOnceAsync(), Is.EqualTo(1), _service.LastError);
+            Assert.That(Directory.GetFiles(_switch).Select(Path.GetFileName), Is.EqualTo(new[] { "Mario Kart 8 Deluxe [0100000000010000][v65536].nsp" }));
         }
 
         [TestCase("VERDICT: NSP FILE IS CORRECT\nVERDICT: NSP FILE IS SAFE", null)]
