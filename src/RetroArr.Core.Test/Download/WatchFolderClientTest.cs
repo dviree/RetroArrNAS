@@ -210,6 +210,20 @@ namespace RetroArr.Core.Test.Download
         }
 
         [Test]
+        public async Task FilmsAndMusic_AreNeverGames()
+        {
+            Write("Some.Movie.2024.1080p/Some.Movie.2024.1080p.mkv");
+            Write("Some.Movie.2024.1080p/Some.Movie.2024.1080p.srt");
+            Write("Album/01 - Track.flac");
+            Write("loose video.mp4");
+            Write("Real Game/game.iso");
+            Write("films/Other.Movie/other.mkv");
+
+            Assert.That((await List()).Select(d => d.Name), Is.EqualTo(new[] { "Real Game" }));
+            Assert.That(await ListRecursive(), Is.EqualTo(new[] { "Real Game" }));
+        }
+
+        [Test]
         public void NeverTakesAGrab()
         {
             var client = new WatchFolderClient(_root);

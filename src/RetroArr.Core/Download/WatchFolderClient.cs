@@ -72,6 +72,13 @@ namespace RetroArr.Core.Download
             ".txt", ".nfo", ".url", ".jpg", ".jpeg", ".png", ".gif", ".webp", ".sfv", ".md5", ".sha1", ".db", ".ini", ".log", ".xml", ".par2", ".torrent"
         };
 
+        // Films, series and music that end up in a download folder too: never a game, and never taken
+        private static readonly HashSet<string> MediaExtensions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ".mkv", ".mp4", ".avi", ".m4v", ".mov", ".wmv", ".mpg", ".mpeg", ".ts", ".m2ts", ".webm", ".flv", ".srt", ".sub", ".idx",
+            ".ass", ".mp3", ".flac", ".m4a", ".aac", ".ogg", ".wav", ".opus"
+        };
+
         // One game per file, as in a ROM set; multi-disc and multi-track files share a name once their disc/track part is gone
         private static readonly HashSet<string> RomExtensions = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -153,6 +160,7 @@ namespace RetroArr.Core.Download
                 : new List<FileInfo> { (FileInfo)entry };
             files = files.Where(f => !f.Name.StartsWith('.')).ToList();
             if (files.Count == 0) return null;
+            if (files.All(f => MediaExtensions.Contains(f.Extension) || JunkExtensions.Contains(f.Extension))) return null;
 
             var platform = DetectPlatform(entry.Name, files);
             if (platform != null && SkippedPlatforms.Contains(platform))
@@ -208,7 +216,7 @@ namespace RetroArr.Core.Download
                 if (entry.Name.StartsWith('.')) continue;
                 if (entry is FileInfo file)
                 {
-                    if (!JunkExtensions.Contains(file.Extension)) yield return file;
+                    if (!JunkExtensions.Contains(file.Extension) && !MediaExtensions.Contains(file.Extension)) yield return file;
                     continue;
                 }
                 var sub = (DirectoryInfo)entry;
@@ -225,7 +233,8 @@ namespace RetroArr.Core.Download
         {
             if (depth >= MaxDepth) return Kind.Game;
             if (File.Exists(Path.Combine(dir.FullName, "eboot.bin")) || Directory.Exists(Path.Combine(dir.FullName, "sce_sys"))) return Kind.Game;
-            var files = dir.EnumerateFiles().Where(f => !f.Name.StartsWith('.') && !JunkExtensions.Contains(f.Extension)).ToList();
+            var files = dir.EnumerateFiles().Where(f => !f.Name.StartsWith('.') && !JunkExtensions.Contains(f.Extension)
+                && !MediaExtensions.Contains(f.Extension)).ToList();
             if (files.Count == 0) return Kind.Collection;
             // A ROM set: only single-file ROMs, more than one game among them, each game one file
             if (files.All(f => RomExtensions.Contains(f.Extension)))
