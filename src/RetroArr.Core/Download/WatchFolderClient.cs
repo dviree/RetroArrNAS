@@ -127,7 +127,22 @@ namespace RetroArr.Core.Download
             if (files.Count == 0) return null;
 
             var platform = DetectPlatform(entry.Name, files);
-            if (platform != null && SkippedPlatforms.Contains(platform)) return null;
+            if (platform != null && SkippedPlatforms.Contains(platform))
+            {
+                // Listed but held back, with what the release is, so it shows up and nothing copies it around
+                var package = Games.PlayStationPackageInspector.Inspect(entry.FullName);
+                return new DownloadStatus
+                {
+                    Id = IdFor(entry.FullName),
+                    Name = entry.Name,
+                    Size = files.Sum(f => f.Length),
+                    State = DownloadState.Paused,
+                    Category = _category,
+                    DownloadPath = entry.FullName,
+                    PlatformFolder = platform,
+                    StatusMessages = { $"{platform.ToUpperInvariant()} {Describe(package)}: not imported, PlayStation import is not built yet" }
+                };
+            }
 
             var newest = files.Max(f => f.LastWriteTimeUtc);
             var settled = DateTime.UtcNow - newest >= SettleTime
@@ -144,6 +159,22 @@ namespace RetroArr.Core.Download
                 DownloadPath = entry.FullName,
                 PlatformFolder = platform
             };
+        }
+
+        internal static string Describe(Games.PlayStationPackage p)
+        {
+            var format = p.Format switch
+            {
+                Games.PlayStationFormat.Folder => "uncompressed game folder",
+                Games.PlayStationFormat.Lz4Folder => "LZ4-compressed game folder",
+                Games.PlayStationFormat.ExfatImage => "exFAT image",
+                Games.PlayStationFormat.FfpfscImage => "FFPFSC image",
+                Games.PlayStationFormat.Pkg => "PKG",
+                Games.PlayStationFormat.Archive => "archive (not unpacked)",
+                _ => "unknown format"
+            };
+            var id = string.Join(" ", new[] { p.TitleId, p.Version != null ? "v" + p.Version : null }.Where(s => s != null));
+            return id.Length > 0 ? $"{format} ({id})" : format;
         }
 
         // The path decides the id, so a folder that is renamed or replaced counts as a new download

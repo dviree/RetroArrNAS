@@ -90,10 +90,20 @@ namespace RetroArr.Core.Test.Download
         [TestCase("Ghost.of.Yotei.Complete.Edition.PS5-DUPLEX/game.pkg")]
         [TestCase("FINAL FANTASY VII REMAKE [PPSA01903]/game.exfat")]
         [TestCase("Bloodborne [CUSA00900]/game.pkg")]
-        public async Task PlayStation4And5_AreLeftAlone(string relative)
+        public async Task PlayStation4And5_AreListedButHeldBack(string relative)
         {
             Write(relative);
-            Assert.That(await List(), Is.Empty);
+            var download = (await List()).Single();
+            Assert.That(download.State, Is.EqualTo(DownloadState.Paused), "a held-back release is never imported");
+            Assert.That(download.StatusMessages.Single(), Does.Contain("not imported"));
+        }
+
+        [Test]
+        public async Task Lz4Folder_SaysSo()
+        {
+            Write("Ghost of Yotei [PPSA12345]/ampr_assets_0001.bin");
+            Write("Ghost of Yotei [PPSA12345]/eboot.bin");
+            Assert.That((await List()).Single().StatusMessages.Single(), Does.Contain("LZ4-compressed game folder (PPSA12345)"));
         }
 
         [Test]
