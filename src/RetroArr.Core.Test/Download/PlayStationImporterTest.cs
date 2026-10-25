@@ -90,8 +90,8 @@ namespace RetroArr.Core.Test.Download
 
             var result = await Import(Image("old.exfat"));
 
-            Assert.That(result.Success, Is.False);
-            Assert.That(result.Reason, Does.Contain("newer version"));
+            Assert.That(result.Success, Is.True, result.Reason);
+            Assert.That(result.Destination, Does.EndWith("[v3.0].exfat"));
             Assert.That(Directory.GetFiles(Ps5), Has.Length.EqualTo(1));
         }
 
@@ -255,17 +255,31 @@ namespace RetroArr.Core.Test.Download
         }
 
         [Test]
-        public async Task APkgIsNeverReplacedByAnImage_FormatsLiveSideBySide()
+        public async Task AGameInAnyForm_IsAlreadyThere_AndNothingIsReplacedAcrossForms()
         {
             Directory.CreateDirectory(Ps5);
+            var lz4 = Directory.CreateDirectory(Path.Combine(Ps5, "Onimusha [PPSA01903]-lz4")).FullName;
             var pkg = Path.Combine(Ps5, "FINAL FANTASY VII REMAKE [PPSA01903].pkg");
             File.WriteAllText(pkg, "pkg without a version in its name");
 
             var result = await Import(Image("ff7r.exfat", "02.000.000"));
 
             Assert.That(result.Success, Is.True, result.Reason);
-            Assert.That(File.Exists(pkg), Is.True, "the PKG stays");
-            Assert.That(Directory.GetFiles(Ps5), Has.Length.EqualTo(2));
+            Assert.That(File.Exists(pkg) && Directory.Exists(lz4), Is.True, "nothing is put in the trash");
+            Assert.That(Directory.GetFiles(Ps5), Has.Length.EqualTo(1), "a game that is there in some form is not added again");
+        }
+
+        [Test]
+        public async Task AnOlderLz4Folder_IsKept_WhenANewerGameArrives()
+        {
+            Directory.CreateDirectory(Ps5);
+            var lz4 = Directory.CreateDirectory(Path.Combine(Ps5, "FF7R [PPSA01903] [v1.0]-lz4")).FullName;
+
+            var result = await Import(Image("ff7r.exfat", "02.000.000"));
+
+            Assert.That(result.Success, Is.True, result.Reason);
+            Assert.That(Directory.Exists(lz4), Is.True, "LZ4 folders are never replaced");
+            Assert.That(Directory.GetFiles(Ps5).Single(), Does.EndWith("[v2.0].exfat"));
         }
 
         [Test]
@@ -282,7 +296,7 @@ namespace RetroArr.Core.Test.Download
         }
 
         [Test]
-        public async Task SameVersionInAnotherFormat_IsKeptAlongside()
+        public async Task SameVersionInAnotherFormat_IsAlreadyThere()
         {
             Directory.CreateDirectory(Ps5);
             File.WriteAllText(Path.Combine(Ps5, "FINAL FANTASY VII REMAKE [PPSA01903] [v1.10].ffpfsc"), "lz4");
@@ -290,7 +304,7 @@ namespace RetroArr.Core.Test.Download
             var result = await Import(Image("ff7r.exfat"));
 
             Assert.That(result.Success, Is.True, result.Reason);
-            Assert.That(Directory.GetFiles(Ps5), Has.Length.EqualTo(2));
+            Assert.That(Directory.GetFiles(Ps5), Has.Length.EqualTo(1));
         }
 
         [TestCase("Ghost.of.Yotei.PS5-DUPLEX", "Ghost of Yotei")]

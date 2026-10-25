@@ -175,35 +175,30 @@ namespace RetroArr.Core.Download
             var name = BuildName(title, package, extension);
             var target = Path.Combine(folder, name);
 
-            // The same game in the same format: a newer or equal version keeps its place, an older one is replaced.
-            // Other formats live side by side (a PKG, an LZ4 folder and an uncompressed folder of one game), and
-            // nothing is replaced unless both versions are known.
+            // The game in any form (PKG, LZ4 folder, uncompressed folder, image) in this or a newer version, or in a
+            // version that can't be told, means it is already there: nothing is added. Only an older version in the
+            // same format is replaced, and never an LZ4 folder; those are the owner's to manage.
             var older = new List<string>();
-            foreach (var existing in SameGame(folder, package, name).Where(e => KindOf(e) == package.Format))
+            foreach (var existing in SameGame(folder, package, name))
             {
-                var existingVersion = VersionIn(Path.GetFileName(existing)) ?? VersionInName(Path.GetFileName(existing));
-                if (SizeOf(existing) == SizeOf(from))
+                var kind = KindOf(existing);
+                if (kind == package.Format && SizeOf(existing) == SizeOf(from))
                 {
                     _logger.Info($"[PlayStation] {releaseName} is already in the library as {existing}");
                     return new Outcome(true, existing, null, title, from);
                 }
-                if (existingVersion == null || package.Version == null) continue;
-                var compare = PlayStationPackageInspector.CompareVersions(existingVersion, package.Version);
-                if (compare > 0)
-                    return Outcome.Fail($"The library already has a newer version: {Path.GetFileName(existing)}");
-                if (compare == 0)
+                if (!IsOlder(existing, package.Version))
                 {
-                    _logger.Info($"[PlayStation] {releaseName}: the same version is already in the library as {existing}");
+                    _logger.Info($"[PlayStation] {releaseName}: already in the library as {Path.GetFileName(existing)} ({kind}), not added");
                     return new Outcome(true, existing, null, title);
                 }
-                older.Add(existing);
+                if (kind == package.Format && kind != PlayStationFormat.Lz4Folder) older.Add(existing);
             }
-            // The other PlayStation libraries (the LZ4 one) are only looked at, never changed
-            var elsewhere = InOtherLibraries(package, folder).Where(e => !older.Contains(e) && KindOf(e) == package.Format)
-                .FirstOrDefault(e => PlayStationPackageInspector.CompareVersions(VersionIn(Path.GetFileName(e)) ?? VersionInName(Path.GetFileName(e)), package.Version) >= 0);
+            // The other PlayStation libraries (the LZ4 one) and folders one level down are only looked at, never changed
+            var elsewhere = InOtherLibraries(package, folder).FirstOrDefault(e => !older.Contains(e) && !IsOlder(e, package.Version));
             if (elsewhere != null)
             {
-                _logger.Info($"[PlayStation] {releaseName} is already in {elsewhere}, not copied");
+                _logger.Info($"[PlayStation] {releaseName} is already in {elsewhere}, not added");
                 return new Outcome(true, elsewhere, null, title);
             }
             if (File.Exists(target) || Directory.Exists(target))
@@ -353,13 +348,19 @@ namespace RetroArr.Core.Download
         /// </summary>
         internal static string? AlreadyThere(string folder, PlayStationPackage package, string releaseName)
         {
-            // Only the same format counts: what the archive holds has to be known from its table of contents
-            if (package.TitleId == null || package.Content != PlayStationContent.Game || package.Inside == PlayStationFormat.Unknown) return null;
+            // Any form counts: an LZ4 folder, a PKG or an uncompressed folder of the game
+            if (package.TitleId == null || package.Content != PlayStationContent.Game) return null;
             var version = package.Version ?? VersionInName(releaseName);
             var here = Directory.Exists(folder) ? SameGame(folder, package, string.Empty) : Enumerable.Empty<string>();
-            return here.Concat(InOtherLibraries(package, Directory.Exists(folder) ? folder : null))
-                .Where(e => KindOf(e) == package.Inside)
-                .FirstOrDefault(e => PlayStationPackageInspector.CompareVersions(VersionIn(Path.GetFileName(e)) ?? VersionInName(Path.GetFileName(e)), version) >= 0);
+            return here.Concat(InOtherLibraries(package, Directory.Exists(folder) ? folder : null)).FirstOrDefault(e => !IsOlder(e, version));
+        }
+
+        // Older only when both versions are known and the entry's is lower
+        private static bool IsOlder(string entry, string? version)
+        {
+            var name = Path.GetFileName(entry);
+            var existing = VersionIn(name) ?? VersionInName(name);
+            return existing != null && version != null && PlayStationPackageInspector.CompareVersions(existing, version) < 0;
         }
 
         /// <summary>The format a library entry is in, by its name and, for a folder, an LZ4 marker at its top.</summary>

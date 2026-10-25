@@ -49,7 +49,7 @@ namespace RetroArr.Core.Test.Games
             Directory.CreateDirectory(Path.Combine(dir, "sce_sys"));
             File.WriteAllText(Path.Combine(dir, "sce_sys", "param.json"),
                 "{\"titleId\":\"PPSA26344\",\"contentVersion\":\"01.000.002\",\"localizedParameters\":{\"defaultLanguage\":\"en-US\",\"en-US\":{\"titleName\":\"Ghost of Yōtei™\"}}}");
-            File.WriteAllText(Path.Combine(dir, "ampr_assets_0001.bin"), "z");
+            if (name.Contains("lz4")) File.WriteAllText(Path.Combine(dir, "ampr_assets_0001.bin"), "z");
             if (old)
                 foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)) File.SetLastWriteTimeUtc(f, DateTime.UtcNow.AddDays(-1));
             return dir;
@@ -66,15 +66,17 @@ namespace RetroArr.Core.Test.Games
         }
 
         [Test]
-        public async Task TitleIdFolders_GetTheGamesOwnTitle_KeepingTheLz4Mark()
+        public async Task TitleIdFolders_GetTheGamesOwnTitle_ButLz4FoldersAreNeverTouched()
         {
             Game(_lz4, "PPSA26344-app0-lz4");
             Game(_ps5, "PPSA26344-app0");
+            Game(_ps5, "PPSA26344-app0-lz4");
 
             var done = await _namer.RunOnceAsync();
 
-            Assert.That(done, Has.Count.EqualTo(2));
-            Assert.That(Directory.Exists(Path.Combine(_lz4, "Ghost of Yōtei [PPSA26344] [v1.0.2]-lz4")), Is.True);
+            Assert.That(done, Has.Count.EqualTo(1));
+            Assert.That(Directory.Exists(Path.Combine(_lz4, "PPSA26344-app0-lz4")), Is.True, "the LZ4 library is the owner's");
+            Assert.That(Directory.Exists(Path.Combine(_ps5, "PPSA26344-app0-lz4")), Is.True, "LZ4 folders keep their name");
             Assert.That(Directory.Exists(Path.Combine(_ps5, "Ghost of Yōtei [PPSA26344] [v1.0.2]")), Is.True);
             Assert.That(Directory.EnumerateFiles(_root, "ps-renames.json", SearchOption.AllDirectories).Count(), Is.EqualTo(1), "every rename can be undone");
         }
