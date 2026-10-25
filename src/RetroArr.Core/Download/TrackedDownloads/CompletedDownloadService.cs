@@ -25,6 +25,7 @@ namespace RetroArr.Core.Download.TrackedDownloads
         private readonly DownloadBlacklistRepository _blacklistRepo;
         private readonly IGameRepository _gameRepository;
         private readonly ILogger<CompletedDownloadService> _logger;
+        private readonly RetroArr.Core.MetadataSource.AiTitleService? _ai;
 
         public CompletedDownloadService(
             PostDownloadProcessor postDownloadProcessor,
@@ -33,8 +34,10 @@ namespace RetroArr.Core.Download.TrackedDownloads
             DownloadHistoryRepository historyRepo,
             DownloadBlacklistRepository blacklistRepo,
             IGameRepository gameRepository,
-            ILogger<CompletedDownloadService> logger)
+            ILogger<CompletedDownloadService> logger,
+            RetroArr.Core.MetadataSource.AiTitleService? ai = null)
         {
+            _ai = ai;
             _postDownloadProcessor = postDownloadProcessor;
             _platformTracker = platformTracker;
             _trackedDownloadService = trackedDownloadService;
@@ -104,6 +107,18 @@ namespace RetroArr.Core.Download.TrackedDownloads
                             _logger.LogInformation("[CompletedDownload] Resolved platform '{Platform}' from game '{Title}' (ID: {GameId})",
                                 platform.FolderName, game.Title, game.Id);
                         }
+                    }
+                }
+
+                // Nothing in the name: the model may know the platform from the name and the files together
+                if (string.IsNullOrEmpty(trackedDownload.PlatformFolder) && _ai is { IsEnabled: true })
+                {
+                    var guess = await _ai.IdentifyAsync(trackedDownload.Title, PostDownloadProcessor.FileNamesFor(trackedDownload.OutputPath));
+                    if (guess != null)
+                    {
+                        trackedDownload.PlatformFolder = guess.Platform;
+                        _logger.LogInformation("[CompletedDownload] AI placed '{Title}' on {Platform} ({Confidence:P0})",
+                            trackedDownload.Title, guess.Platform, guess.Confidence);
                     }
                 }
 

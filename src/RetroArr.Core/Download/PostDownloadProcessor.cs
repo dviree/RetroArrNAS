@@ -28,6 +28,7 @@ namespace RetroArr.Core.Download
         private readonly IArchiveService _archiveService;
         private readonly TitleCleanerService _titleCleaner;
         private readonly FileRenamer? _fileRenamer;
+        private readonly AiTitleService? _ai;
 
         public PostDownloadProcessor(
             ConfigurationService configService,
@@ -36,8 +37,10 @@ namespace RetroArr.Core.Download
             IGameMetadataServiceFactory metadataFactory,
             IArchiveService archiveService,
             TitleCleanerService titleCleaner,
-            FileRenamer? fileRenamer = null)
+            FileRenamer? fileRenamer = null,
+            AiTitleService? ai = null)
         {
+            _ai = ai;
             _configService = configService;
             _fileMover = fileMover;
             _gameRepository = gameRepository;
@@ -288,13 +291,25 @@ namespace RetroArr.Core.Download
 
             try 
             {
+                // The model names the game first (as GameSauce did); IGDB double-checks that name
+                var aiGuess = _ai is { IsEnabled: true } ? await _ai.IdentifyAsync(download.Name, FileNamesFor(download.DownloadPath)) : null;
+                var query = aiGuess?.Title ?? cleanName;
                 var metadataService = _metadataFactory.CreateService();
-                var searchResults = await metadataService.SearchGamesAsync(cleanName);
+                var searchResults = await metadataService.SearchGamesAsync(query);
                 if (searchResults.Any())
                 {
-                    containerName = SanitizeFileName(BestMatch(searchResults, cleanName).Title);
+                    var best = BestMatch(searchResults, query);
+                    // IGDB's spelling when it knows the model's title, else the model's title over a different IGDB game
+                    containerName = SanitizeFileName(aiGuess == null || TitleKey(best.Title) == TitleKey(aiGuess.Title) ? best.Title : aiGuess.Title);
                     shouldNest = true;
-                    _logger.Info($"[PostDownload] Resolved game name: '{download.Name}' -> '{containerName}'");
+                    _logger.Info($"[PostDownload] Resolved game name: '{download.Name}' -> '{containerName}'"
+                        + (aiGuess != null ? $" (AI: '{aiGuess.Title}', IGDB: '{best.Title}')" : ""));
+                }
+                else if (aiGuess != null)
+                {
+                    containerName = SanitizeFileName(aiGuess.Title);
+                    shouldNest = true;
+                    _logger.Info($"[PostDownload] Resolved game name from AI, not on IGDB: '{download.Name}' -> '{containerName}'");
                 }
                 else
                 {
@@ -901,9 +916,20 @@ namespace RetroArr.Core.Download
         // Galaxy 2" for "Super Mario Galaxy 2"), so a result named exactly as the release wins over the first one
         internal static Game BestMatch(List<Game> results, string query)
         {
-            static string Key(string? s) => new string((s ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
-            var key = Key(query);
-            return results.FirstOrDefault(r => key.Length > 0 && Key(r.Title) == key) ?? results.First();
+            var key = TitleKey(query);
+            return results.FirstOrDefault(r => key.Length > 0 && TitleKey(r.Title) == key) ?? results.First();
+        }
+
+        private static string TitleKey(string? s) => new string((s ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+        // What the model gets to see: the release's file names, relative to it
+        internal static List<string> FileNamesFor(string? path)
+        {
+            if (string.IsNullOrEmpty(path)) return new List<string>();
+            if (File.Exists(path)) return new List<string> { Path.GetFileName(path) };
+            if (!Directory.Exists(path)) return new List<string>();
+            return Directory.EnumerateFiles(path, "*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true })
+                .Take(300).Select(f => Path.GetRelativePath(path, f)).ToList();
         }
 
         internal string CleanReleaseName(string input)
