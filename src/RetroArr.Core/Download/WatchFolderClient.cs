@@ -28,8 +28,12 @@ namespace RetroArr.Core.Download
         // Something written to in this window may still be on its way in
         internal static TimeSpan SettleTime = TimeSpan.FromMinutes(2);
 
-        // PS4/PS5 packages stay with their own tooling, they are never copied around by the watcher
-        private static readonly HashSet<string> SkippedPlatforms = new(StringComparer.OrdinalIgnoreCase) { "ps4", "ps5" };
+        // PS4/PS5 images and packages are big and written slowly by converters: they have to be still for longer
+        internal static TimeSpan PlayStationSettleTime = TimeSpan.FromMinutes(15);
+
+        // While this file exists a PS5 converter is writing images; nothing PlayStation is taken meanwhile
+        internal static string PlayStationHoldFile =
+            Environment.GetEnvironmentVariable("PS_HOLD_FILE") ?? "/host-tmp/ps5-smart-converter.lock";
 
         // Half-finished downloads from JDownloader, browsers and the like
         private static readonly string[] PartialExtensions = { ".part", ".partial", ".crdownload", ".tmp", ".!qb", ".aria2" };
@@ -42,14 +46,14 @@ namespace RetroArr.Core.Download
             [".nes"] = "NES", [".sfc"] = "SNES", [".smc"] = "SNES", [".z64"] = "N64", [".n64"] = "N64", [".v64"] = "N64",
             [".wua"] = "Wii U", [".wux"] = "Wii U", [".wud"] = "Wii U", [".gdi"] = "Dreamcast", [".cdi"] = "Dreamcast",
             [".vpk"] = "PSVita", [".md"] = "Genesis", [".gen"] = "Genesis", [".smd"] = "Genesis", [".sms"] = "Master System",
-            [".gg"] = "Game Gear",
+            [".gg"] = "Game Gear", [".exfat"] = "PS5", [".ffpfsc"] = "PS5",
         };
 
         // Sony title IDs in a release or folder name
         private static readonly (Regex Pattern, string Tag)[] TitleIdTags =
         {
-            (new Regex(@"\b(PPSA|ECAS)\d{5}\b", RegexOptions.IgnoreCase), "PS5"),
-            (new Regex(@"\bCUSA\d{5}\b", RegexOptions.IgnoreCase), "PS4"),
+            (new Regex(@"(?<![A-Za-z0-9])(PPSA|ECAS)[-_]?\d{5}(?!\d)", RegexOptions.IgnoreCase), "PS5"),
+            (new Regex(@"(?<![A-Za-z0-9])CUSA[-_]?\d{5}(?!\d)", RegexOptions.IgnoreCase), "PS4"),
             (new Regex(@"\b(BC|BL|NP)[UEJAK][SB]\d{5}\b", RegexOptions.IgnoreCase), "PS3"),
         };
 
@@ -84,8 +88,10 @@ namespace RetroArr.Core.Download
         {
             ".nes", ".fds", ".sfc", ".smc", ".gb", ".gbc", ".gba", ".nds", ".3ds", ".cia", ".n64", ".z64", ".v64", ".md", ".gen", ".smd",
             ".sms", ".gg", ".32x", ".pce", ".a26", ".a78", ".lnx", ".ws", ".wsc", ".ngp", ".ngc", ".vb", ".iso", ".chd", ".cso", ".rvz",
-            ".gcz", ".wbfs", ".wua", ".nsp", ".nsz", ".xci", ".xcz", ".pbp", ".cue", ".bin", ".gdi", ".cdi", ".zip", ".7z"
+            ".gcz", ".wbfs", ".wua", ".nsp", ".nsz", ".xci", ".xcz", ".pbp", ".cue", ".bin", ".gdi", ".cdi", ".zip", ".7z",
+            ".exfat", ".ffpfsc", ".pkg"
         };
+        private static readonly HashSet<string> PlayStationFiles = new(StringComparer.OrdinalIgnoreCase) { ".exfat", ".ffpfsc", ".pkg" };
         private static readonly Regex DiscPart = new(@"\s*[\(\[]?\b(disc|disk|cd|track)\s*\d+[\)\]]?", RegexOptions.IgnoreCase);
         private const int MaxDepth = 6;
 
@@ -163,22 +169,8 @@ namespace RetroArr.Core.Download
             if (files.All(f => MediaExtensions.Contains(f.Extension) || JunkExtensions.Contains(f.Extension))) return null;
 
             var platform = DetectPlatform(entry.Name, files);
-            if (platform != null && SkippedPlatforms.Contains(platform))
-            {
-                // Listed but held back, with what the release is, so it shows up and nothing copies it around
-                var package = Games.PlayStationPackageInspector.Inspect(entry.FullName);
-                return new DownloadStatus
-                {
-                    Id = IdFor(entry.FullName),
-                    Name = entry.Name,
-                    Size = files.Sum(f => f.Length),
-                    State = DownloadState.Paused,
-                    Category = _category,
-                    DownloadPath = entry.FullName,
-                    PlatformFolder = platform,
-                    StatusMessages = { $"{platform.ToUpperInvariant()} {Describe(package)}: not imported, PlayStation import is not built yet" }
-                };
-            }
+            if (PlayStationImporter.IsPlayStation(platform))
+                return DescribePlayStation(entry, files, platform!);
 
             var newest = files.Max(f => f.LastWriteTimeUtc);
             var settled = DateTime.UtcNow - newest >= SettleTime
@@ -194,6 +186,35 @@ namespace RetroArr.Core.Download
                 Category = _category,
                 DownloadPath = entry.FullName,
                 PlatformFolder = platform
+            };
+        }
+
+        private DownloadStatus DescribePlayStation(FileSystemInfo entry, List<FileInfo> files, string platform)
+        {
+            var package = Games.PlayStationPackageInspector.Inspect(entry.FullName);
+            var what = $"{platform.ToUpperInvariant()} {Describe(package)}";
+            string? held = package.Format switch
+            {
+                Games.PlayStationFormat.Archive => "not imported, unpacking PlayStation archives is not built yet",
+                Games.PlayStationFormat.Unknown => "not imported, no game, image or package found",
+                Games.PlayStationFormat.Folder or Games.PlayStationFormat.Lz4Folder when !PlayStationImporter.ImportFolders =>
+                    "left for the converter (PS_IMPORT_FOLDERS=true imports game folders)",
+                _ => null
+            };
+            var settled = DateTime.UtcNow - files.Max(f => f.LastWriteTimeUtc) >= PlayStationSettleTime
+                && !files.Any(f => PartialExtensions.Contains(f.Extension, StringComparer.OrdinalIgnoreCase))
+                && !File.Exists(PlayStationHoldFile);
+            return new DownloadStatus
+            {
+                Id = IdFor(entry.FullName),
+                Name = entry.Name,
+                Size = files.Sum(f => f.Length),
+                Progress = held == null && settled ? 100 : 0,
+                State = held != null ? DownloadState.Paused : settled ? DownloadState.Completed : DownloadState.Downloading,
+                Category = _category,
+                DownloadPath = entry.FullName,
+                PlatformFolder = platform,
+                StatusMessages = { held != null ? $"{what}: {held}" : settled ? what : $"{what}: waiting until it is no longer written to" }
             };
         }
 
@@ -242,7 +263,10 @@ namespace RetroArr.Core.Download
                 var games = files.GroupBy(f => DiscPart.Replace(Path.GetFileNameWithoutExtension(f.Name), "").Trim().ToLowerInvariant()).ToList();
                 if (games.Count > 1 && games.All(g => g.Count() == 1)) return Kind.RomSet;
                 // One ROM in a folder named for something else (a site, a source) is the game, not the folder
-                if (games.Count == 1 && games[0].Count() == 1 && !NamesAlike(dir.Name, games[0].Key)) return Kind.RomSet;
+                // except an image in a folder that names its title ID ("PPSA01234 Game.ffpfsc/game.ffpfsc")
+                if (games.Count == 1 && games[0].Count() == 1 && !NamesAlike(dir.Name, games[0].Key)
+                    && !(PlayStationFiles.Contains(files[0].Extension) && Games.PlayStationPackageInspector.TitleIdIn(dir.Name).Length > 0))
+                    return Kind.RomSet;
             }
             return Kind.Game;
         }

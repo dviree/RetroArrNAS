@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -22,11 +23,21 @@ namespace RetroArr.Core.Games
         Archive
     }
 
+    public enum PlayStationContent { Game, Update, Dlc }
+
     /// <summary>What a PS4/PS5 release on disk is, and the title ID, version and name its param.json gives.</summary>
     public sealed record PlayStationPackage(PlayStationFormat Format, string? TitleId, string? Version, string? Title, string? GameFolder)
     {
         // For an archive: what its table of contents shows inside, read without unpacking anything
         public PlayStationFormat Inside { get; init; } = PlayStationFormat.Unknown;
+
+        // The image or package file itself, also when a folder holding it was inspected
+        public string? ImageFile { get; init; }
+
+        public PlayStationContent Content { get; init; } = PlayStationContent.Game;
+
+        // EP5291-PPSA34547_00-0210080241603648: from a package header or its file name
+        public string? ContentId { get; init; }
 
         public bool IsCompressed => Format is PlayStationFormat.Lz4Folder or PlayStationFormat.FfpfscImage;
     }
@@ -34,12 +45,26 @@ namespace RetroArr.Core.Games
     [SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes")]
     public static class PlayStationPackageInspector
     {
-        private static readonly Regex TitleIdRegex = new(@"\b(PPSA|CUSA|ECAS)\d{5}\b", RegexOptions.IgnoreCase);
+        // Also inside a content ID, where an underscore follows: UP9000-PPSA26344_00-GHOST2SHIP000000
+        private static readonly Regex TitleIdRegex = new(@"(?<![A-Za-z0-9])(PPSA|CUSA|ECAS)[-_]?(\d{5})(?!\d)", RegexOptions.IgnoreCase);
+        private static readonly Regex ContentIdRegex = new(@"[A-Z]{2}\d{4}-(?:PPSA|CUSA)\d{5}_\d{2}-[A-Z0-9]{16}", RegexOptions.IgnoreCase);
+        private static readonly Regex UpdateWords = new(@"(?<![A-Za-z])(update|patch)(?![A-Za-z])", RegexOptions.IgnoreCase);
+        private static readonly Regex DlcWords = new(@"(?<![A-Za-z])DLC(?![A-Za-z])", RegexOptions.IgnoreCase);
+
+        /// <summary>PPSA01234 out of a name, whatever separates it ("PPSA-01234", "PPSA01234_00"), or an empty string.</summary>
+        public static string TitleIdIn(string? name)
+        {
+            var m = TitleIdRegex.Match(name ?? string.Empty);
+            return m.Success ? (m.Groups[1].Value + m.Groups[2].Value).ToUpperInvariant() : string.Empty;
+        }
         private static readonly Regex ArchiveRegex = new(@"\.(rar|7z|zip|r\d\d|\d{3})$", RegexOptions.IgnoreCase);
 
         public static PlayStationPackage Inspect(string path)
         {
-            var idFromName = TitleIdRegex.Match(Path.GetFileName(path.TrimEnd('/', '\\'))).Value.ToUpperInvariant();
+            var trimmed = path.TrimEnd('/', '\\');
+            // A file called game.ffpfsc says nothing; the folder JDownloader put it in does
+            var idFromName = TitleIdIn(Path.GetFileName(trimmed));
+            if (idFromName.Length == 0 && File.Exists(path)) idFromName = TitleIdIn(Path.GetFileName(Path.GetDirectoryName(trimmed)));
             if (File.Exists(path)) return ForFile(path, idFromName);
             if (!Directory.Exists(path)) return new(PlayStationFormat.Unknown, NullIfEmpty(idFromName), null, null, null);
 
@@ -65,9 +90,9 @@ namespace RetroArr.Core.Games
             {
                 // An archive set is read through its first volume
                 var candidates = format == PlayStationFormat.Archive ? files.OrderBy(f => FirstVolumeRank(f)).ToList() : files;
-                var hit = candidates.FirstOrDefault(f => ForFile(f, idFromName).Format == format);
+                var hit = candidates.FirstOrDefault(f => FormatOf(Path.GetFileName(f)) == format);
                 if (hit != null)
-                    return ForFile(hit, NullIfEmpty(idFromName) ?? TitleIdRegex.Match(Path.GetFileName(hit)).Value.ToUpperInvariant()) with { GameFolder = path };
+                    return ForFile(hit, NullIfEmpty(idFromName) ?? TitleIdIn(Path.GetFileName(hit))) with { GameFolder = path };
             }
             return new(PlayStationFormat.Unknown, NullIfEmpty(idFromName), null, null, null);
         }
@@ -75,18 +100,52 @@ namespace RetroArr.Core.Games
         private static PlayStationPackage ForFile(string file, string idFromName)
         {
             var name = Path.GetFileName(file);
-            var id = NullIfEmpty(idFromName) ?? NullIfEmpty(TitleIdRegex.Match(name).Value.ToUpperInvariant());
-            var format = Path.GetExtension(file).ToLowerInvariant() switch
+            var id = NullIfEmpty(idFromName) ?? NullIfEmpty(TitleIdIn(name));
+            var contentId = NullIfEmpty(ContentIdRegex.Match(name).Value.ToUpperInvariant());
+            var format = FormatOf(name);
+            var content = DlcWords.IsMatch(name) ? PlayStationContent.Dlc : UpdateWords.IsMatch(name) ? PlayStationContent.Update : PlayStationContent.Game;
+            switch (format)
             {
-                ".ffpfsc" => PlayStationFormat.FfpfscImage,
-                ".exfat" => PlayStationFormat.ExfatImage,
-                ".pkg" => PlayStationFormat.Pkg,
-                ".lz4" => PlayStationFormat.Lz4Folder,
-                _ => ArchiveRegex.IsMatch(name) ? PlayStationFormat.Archive : PlayStationFormat.Unknown
-            };
-            if (format != PlayStationFormat.Archive) return new(format, id, null, null, null);
-            var (inside, innerId) = PeekArchive(file);
-            return new(format, id ?? innerId, null, null, null) { Inside = inside };
+                case PlayStationFormat.ExfatImage:
+                {
+                    // The image's own param.json (PS5) or param.sfo (PS4), read without mounting it
+                    var data = ExFatImageReader.ReadFirst(file, "sce_sys/param.json", "sce_sys/param.sfo");
+                    var meta = data == null ? default : data.Length > 0 && data[0] == 0 ? FromSfo(ParamSfo.Parse(data)) : ParseParamJson(Encoding.UTF8.GetString(data));
+                    return new(format, meta.Id ?? id, meta.Version, meta.Title, null) { ImageFile = file, Content = content, ContentId = contentId };
+                }
+                case PlayStationFormat.Pkg:
+                {
+                    var (headerId, sfo) = PkgReader.Read(file);
+                    var meta = FromSfo(sfo);
+                    content = sfo.TryGetValue("CATEGORY", out var category) && category.StartsWith("gp", StringComparison.OrdinalIgnoreCase) ? PlayStationContent.Update
+                        : category?.StartsWith("ac", StringComparison.OrdinalIgnoreCase) == true ? PlayStationContent.Dlc
+                        : sfo.Count > 0 ? PlayStationContent.Game : content;
+                    contentId = NullIfEmpty(headerId?.ToUpperInvariant()) ?? contentId;
+                    return new(format, meta.Id ?? id ?? NullIfEmpty(TitleIdIn(contentId)), meta.Version, meta.Title, null) { ImageFile = file, Content = content, ContentId = contentId };
+                }
+                case PlayStationFormat.Archive:
+                {
+                    var (inside, innerId) = PeekArchive(file);
+                    return new(format, id ?? innerId, null, null, null) { Inside = inside, ImageFile = file, Content = content };
+                }
+                default:
+                    return new(format, id, null, null, null) { ImageFile = format == PlayStationFormat.Unknown ? null : file, Content = content, ContentId = contentId };
+            }
+        }
+
+        private static PlayStationFormat FormatOf(string name) => Path.GetExtension(name).ToLowerInvariant() switch
+        {
+            ".ffpfsc" => PlayStationFormat.FfpfscImage,
+            ".exfat" => PlayStationFormat.ExfatImage,
+            ".pkg" => PlayStationFormat.Pkg,
+            ".lz4" => PlayStationFormat.Lz4Folder,
+            _ => ArchiveRegex.IsMatch(name) ? PlayStationFormat.Archive : PlayStationFormat.Unknown
+        };
+
+        private static (string? Id, string? Version, string? Title) FromSfo(Dictionary<string, string> sfo)
+        {
+            string? Get(string key) => sfo.TryGetValue(key, out var v) && v.Length > 0 ? v : null;
+            return (Get("TITLE_ID")?.ToUpperInvariant(), Get("APP_VER") ?? Get("VERSION"), Get("TITLE"));
         }
 
         // The entry names in an archive's table of contents, by the same rules as a folder. Nothing is unpacked.
@@ -96,7 +155,7 @@ namespace RetroArr.Core.Games
             {
                 using var archive = SharpCompress.Archives.ArchiveFactory.OpenArchive(file);
                 var names = archive.Entries.Select(e => e.Key ?? string.Empty).Take(100000).ToList();
-                var id = names.Select(n => TitleIdRegex.Match(n).Value.ToUpperInvariant()).FirstOrDefault(v => v.Length > 0);
+                var id = names.Select(TitleIdIn).FirstOrDefault(v => v.Length > 0);
                 bool Any(Func<string, bool> f) => names.Any(n => f(n.Replace('\\', '/')));
                 PlayStationFormat inside;
                 if (Any(n => n.Split('/').Any(p => p.StartsWith("ampr_assets", StringComparison.OrdinalIgnoreCase) || p.Contains("lz4", StringComparison.OrdinalIgnoreCase))))
@@ -133,18 +192,35 @@ namespace RetroArr.Core.Games
         // The folder itself, or the single *-app0 (or other) folder in it that holds eboot.bin and sce_sys/param.json
         private static string? FindGameRoot(string folder)
         {
-            static bool IsRoot(string d) => File.Exists(Path.Combine(d, "eboot.bin")) && File.Exists(Path.Combine(d, "sce_sys", "param.json"));
+            static bool IsRoot(string d) => File.Exists(Path.Combine(d, "eboot.bin"))
+                && (File.Exists(Path.Combine(d, "sce_sys", "param.json")) || File.Exists(Path.Combine(d, "sce_sys", "param.sfo")));
             if (IsRoot(folder)) return folder;
             var inner = Directory.EnumerateDirectories(folder).Where(IsRoot).ToList();
             return inner.Count == 1 ? inner[0] : null;
         }
 
-        // PS5 param.json: titleId, contentVersion ("01.010.000"), localizedParameters.<defaultLanguage>.titleName
+        // PS5 param.json, or a PS4 folder's param.sfo
         private static (string? Id, string? Version, string? Title) ReadParam(string gameRoot)
         {
             try
             {
-                using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(gameRoot, "sce_sys", "param.json")));
+                var json = Path.Combine(gameRoot, "sce_sys", "param.json");
+                if (File.Exists(json)) return ParseParamJson(File.ReadAllText(json));
+                var sfo = Path.Combine(gameRoot, "sce_sys", "param.sfo");
+                return File.Exists(sfo) ? FromSfo(ParamSfo.Parse(File.ReadAllBytes(sfo))) : default;
+            }
+            catch (Exception)
+            {
+                return (null, null, null);
+            }
+        }
+
+        // titleId, contentVersion ("01.010.000"), localizedParameters.<defaultLanguage>.titleName
+        internal static (string? Id, string? Version, string? Title) ParseParamJson(string text)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(text);
                 var root = doc.RootElement;
                 string? Str(JsonElement e, string name) => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
                 string? title = null;

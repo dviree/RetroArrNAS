@@ -87,15 +87,58 @@ namespace RetroArr.Core.Test.Download
             Assert.That(downloads.Select(d => d.State), Is.All.EqualTo(DownloadState.Downloading));
         }
 
-        [TestCase("Ghost.of.Yotei.Complete.Edition.PS5-DUPLEX/game.pkg")]
-        [TestCase("FINAL FANTASY VII REMAKE [PPSA01903]/game.exfat")]
-        [TestCase("Bloodborne [CUSA00900]/game.pkg")]
-        public async Task PlayStation4And5_AreListedButHeldBack(string relative)
+        [TestCase("Ghost.of.Yotei.Complete.Edition.PS5-DUPLEX/game.pkg", "ps5")]
+        [TestCase("FINAL FANTASY VII REMAKE [PPSA01903]/game.exfat", "ps5")]
+        [TestCase("Bloodborne [CUSA00900]/game.pkg", "ps4")]
+        [TestCase("UP9000-PPSA26344_00-GHOST2SHIP000000.pkg", "ps5")]
+        [TestCase("Astro Bot.ffpfsc", "ps5")]
+        public async Task PlayStationImagesAndPackages_AreImported_OnceStill(string relative, string platform)
         {
-            Write(relative);
+            var path = Write(relative);
+            var download = (await List()).Single();
+            Assert.That((download.State, download.PlatformFolder), Is.EqualTo((DownloadState.Completed, platform)));
+
+            File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddMinutes(-5));
+            Assert.That((await List()).Single().State, Is.EqualTo(DownloadState.Downloading), "a PS image has to be still for 15 minutes");
+        }
+
+        [Test]
+        public async Task PlayStationArchive_IsHeldBack()
+        {
+            Write("Ghost of Yotei [PPSA12345]/ghost.part01.rar");
             var download = (await List()).Single();
             Assert.That(download.State, Is.EqualTo(DownloadState.Paused), "a held-back release is never imported");
-            Assert.That(download.StatusMessages.Single(), Does.Contain("not imported"));
+            Assert.That(download.StatusMessages.Single(), Does.Contain("not built yet"));
+        }
+
+        [Test]
+        public async Task WhileTheConverterRuns_NothingPlayStationIsTaken()
+        {
+            Write("Game [PPSA12345].exfat");
+            var hold = WatchFolderClient.PlayStationHoldFile;
+            WatchFolderClient.PlayStationHoldFile = Write("converter.lock.txt");
+            try
+            {
+                Assert.That((await List()).Single().State, Is.EqualTo(DownloadState.Downloading));
+            }
+            finally
+            {
+                WatchFolderClient.PlayStationHoldFile = hold;
+            }
+        }
+
+        [Test]
+        public async Task Recursive_ImagesFolder_IsOneGamePerImage_AndAnIdFolderKeepsItsImage()
+        {
+            Write("exfat/Astro Bot [PPSA01234].exfat");
+            Write("exfat/Ghost of Yotei [PPSA26344].exfat");
+            Write("PPSA05678 Some Game.ffpfsc/game.ffpfsc");
+            Assert.That(await ListRecursive(), Is.EqualTo(new[]
+            {
+                Path.Combine("exfat", "Astro Bot [PPSA01234].exfat"),
+                Path.Combine("exfat", "Ghost of Yotei [PPSA26344].exfat"),
+                "PPSA05678 Some Game.ffpfsc"
+            }));
         }
 
         [Test]

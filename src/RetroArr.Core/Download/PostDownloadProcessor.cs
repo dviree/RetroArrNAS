@@ -71,6 +71,11 @@ namespace RetroArr.Core.Download
             // gets deleted. Files the cleanup would have removed are skipped on import instead.
             // A watch folder in move mode is kept like a torrent during the import and only removed once verified below
             var moveAfterImport = IsWatchFolderMove(download);
+
+            // PS4/PS5 from a watch folder: named from the game's own metadata, never unpacked or cleaned
+            if (PlayStationImporter.IsPlayStation(download.PlatformFolder) && IsWatchFolder(download))
+                return await ImportPlayStationAsync(download, moveAfterImport);
+
             var keep = IsTorrentDownload(download) || moveAfterImport ? new HashSet<string>() : null;
 
             // 1. Auto-Extract
@@ -1508,6 +1513,26 @@ namespace RetroArr.Core.Download
         {
             var client = _configService.LoadDownloadClients().FirstOrDefault(c => c.Id == download.ClientId);
             return KeepSourceClients.Contains(client?.Implementation, StringComparer.OrdinalIgnoreCase) && !IsMoveMode(client);
+        }
+
+        private bool IsWatchFolder(DownloadStatus download) =>
+            _configService.LoadDownloadClients().FirstOrDefault(c => c.Id == download.ClientId)?.Implementation
+                .Equals(WatchFolderClient.ImplementationName, StringComparison.OrdinalIgnoreCase) == true;
+
+        private async System.Threading.Tasks.Task<PostDownloadResult> ImportPlayStationAsync(DownloadStatus download, bool moveAfterImport)
+        {
+            var media = _configService.LoadMediaSettings();
+            var libraryRoot = !string.IsNullOrEmpty(media.DestinationPath) && Path.IsPathRooted(media.DestinationPath) ? media.DestinationPath
+                : !string.IsNullOrEmpty(media.FolderPath) && Path.IsPathRooted(media.FolderPath) ? media.FolderPath : null;
+            if (libraryRoot == null) return PostDownloadResult.Fail("Library path not configured.");
+            var platformFolder = ResolvePlatformFolderName(download.PlatformFolder, media.FolderNamingMode) ?? download.PlatformFolder!;
+            var outcome = await new PlayStationImporter(_fileMover, _ai, _trash).ImportAsync(download.DownloadPath!, download.Name, libraryRoot, platformFolder);
+            if (!outcome.Success) return PostDownloadResult.Fail(outcome.Reason ?? "PlayStation import failed");
+            try { await AddMovedGameToLibraryAsync(outcome.Title ?? download.Name, outcome.Destination!, false, _metadataFactory.CreateService(), download.PlatformFolder, false); }
+            catch (Exception ex) { _logger.Warn($"[PostDownload] {outcome.Destination} is in the library folder but not yet in the list, the next scan adds it: {ex.Message}"); }
+            if (moveAfterImport && outcome.VerifyFrom != null && SourceVerified(outcome.VerifyFrom, outcome.Destination, null))
+                await RetireSourceAsync(download.DownloadPath!, download.Name);
+            return PostDownloadResult.Ok(outcome.Destination);
         }
 
         private bool IsWatchFolderMove(DownloadStatus download) =>

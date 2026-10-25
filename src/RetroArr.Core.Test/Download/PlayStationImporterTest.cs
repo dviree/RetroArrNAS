@@ -1,0 +1,182 @@
+using System;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using NUnit.Framework;
+using RetroArr.Core.Configuration;
+using RetroArr.Core.Download;
+using RetroArr.Core.Games;
+using RetroArr.Core.IO;
+using RetroArr.Core.Test.Games;
+
+namespace RetroArr.Core.Test.Download
+{
+    [TestFixture]
+    public class PlayStationImporterTest
+    {
+        private string _root = null!;
+        private string _library = null!;
+        private string _inbox = null!;
+        private PlayStationImporter _importer = null!;
+
+        [SetUp]
+        public void SetUp()
+        {
+            _root = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "retroarr_psimport_" + Path.GetRandomFileName())).FullName;
+            _library = Directory.CreateDirectory(Path.Combine(_root, "roms")).FullName;
+            _inbox = Directory.CreateDirectory(Path.Combine(_root, "jdownloader")).FullName;
+            var config = new ConfigurationService(Path.Combine(_root, "config"));
+            var media = config.LoadMediaSettings();
+            media.TrashPath = Path.Combine(_root, "bin");
+            config.SaveMediaSettings(media);
+            _importer = new PlayStationImporter(new FileMoverService(), null, new TrashService(config));
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            Environment.SetEnvironmentVariable("PS_IMPORT_FOLDERS", null);
+            Directory.Delete(_root, true);
+        }
+
+        private string Image(string relative, string version = "01.010.000", int padding = 700)
+        {
+            var json = PlayStationReadersTest.ParamJson.Replace("01.010.000", version);
+            var path = Path.Combine(_inbox, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllBytes(path, PlayStationReadersTest.ExFat(("sce_sys/param.json", Encoding.UTF8.GetBytes(json)), ("eboot.bin", new byte[padding])));
+            return path;
+        }
+
+        private string Ps5 => Path.Combine(_library, "ps5");
+
+        private Task<PlayStationImporter.Outcome> Import(string source) =>
+            _importer.ImportAsync(source, Path.GetFileName(source), _library, "ps5");
+
+        [Test]
+        public async Task ExfatImage_IsNamedFromItsOwnMetadata_AndCopiedIntoTheLibrary()
+        {
+            var source = Image("exfat/ff7r_repack.exfat");
+
+            var result = await Import(source);
+
+            Assert.That(result.Success, Is.True, result.Reason);
+            Assert.That(Directory.GetFileSystemEntries(Ps5).Select(Path.GetFileName), Is.EqualTo(new[] { "FINAL FANTASY VII REMAKE [PPSA01903] [v1.10].exfat" }));
+            Assert.That(File.Exists(source), Is.True, "the importer copies; the watch folder decides about the source");
+            Assert.That(result.VerifyFrom, Is.EqualTo(source));
+        }
+
+        [Test]
+        public async Task NewerVersion_ReplacesTheOlder_WhichGoesToTheTrash()
+        {
+            Directory.CreateDirectory(Ps5);
+            var old = Path.Combine(Ps5, "FINAL FANTASY VII REMAKE [PPSA01903] [v1.0].exfat");
+            File.WriteAllText(old, "old");
+
+            var result = await Import(Image("new.exfat", "02.000.000"));
+
+            Assert.That(result.Success, Is.True, result.Reason);
+            Assert.That(Directory.GetFileSystemEntries(Ps5).Select(Path.GetFileName), Is.EqualTo(new[] { "FINAL FANTASY VII REMAKE [PPSA01903] [v2.0].exfat" }));
+            Assert.That(Directory.EnumerateFiles(Path.Combine(_root, "bin"), "*.exfat", SearchOption.AllDirectories).Single(), Does.EndWith("[v1.0].exfat"));
+        }
+
+        [Test]
+        public async Task OlderVersion_IsNotImported()
+        {
+            Directory.CreateDirectory(Ps5);
+            File.WriteAllText(Path.Combine(Ps5, "FINAL FANTASY VII REMAKE [PPSA01903] [v3.0].ffpfsc"), "newer");
+
+            var result = await Import(Image("old.exfat"));
+
+            Assert.That(result.Success, Is.False);
+            Assert.That(result.Reason, Does.Contain("newer version"));
+            Assert.That(Directory.GetFiles(Ps5), Has.Length.EqualTo(1));
+        }
+
+        [Test]
+        public async Task SameRelease_AlreadyThere_IsADuplicate_NotASecondCopy()
+        {
+            var source = Image("a.exfat");
+            Assert.That((await Import(source)).Success, Is.True);
+
+            var again = await Import(source);
+
+            Assert.That(again.Success, Is.True);
+            Assert.That(again.Destination, Does.EndWith("[v1.10].exfat"));
+            Assert.That(Directory.GetFiles(Ps5), Has.Length.EqualTo(1));
+        }
+
+        [Test]
+        public async Task DlcAndUpdates_NeverReplaceTheGame()
+        {
+            Directory.CreateDirectory(Ps5);
+            File.WriteAllText(Path.Combine(Ps5, "Ghost of Yotei [PPSA26344] [v1.0].exfat"), "game");
+            var dlc = Path.Combine(_inbox, "EP9000-PPSA26344_00-LEGENDSPACK00001 DLC.pkg");
+            File.WriteAllText(dlc, "dlc");
+
+            var result = await _importer.ImportAsync(dlc, Path.GetFileName(dlc), _library, "ps5");
+
+            Assert.That(result.Success, Is.True, result.Reason);
+            Assert.That(Directory.GetFiles(Ps5).Select(Path.GetFileName), Is.EquivalentTo(new[]
+            {
+                "Ghost of Yotei [PPSA26344] [v1.0].exfat",
+                "Ghost of Yotei [PPSA26344] [DLC LEGENDSPACK00001].pkg"
+            }), "the DLC takes the name of the game with its title ID");
+            Assert.That(Directory.GetFiles(Ps5), Has.Length.EqualTo(2));
+        }
+
+        [Test]
+        public async Task GameFolder_IsLeftForTheConverter_UnlessFoldersAreImported()
+        {
+            var folder = Directory.CreateDirectory(Path.Combine(_inbox, "Release", "PPSA01903-app0")).FullName;
+            File.WriteAllText(Path.Combine(folder, "eboot.bin"), "x");
+            Directory.CreateDirectory(Path.Combine(folder, "sce_sys"));
+            File.WriteAllText(Path.Combine(folder, "sce_sys", "param.json"), PlayStationReadersTest.ParamJson);
+            var release = Path.Combine(_inbox, "Release");
+
+            Assert.That((await Import(release)).Reason, Does.Contain("converter"));
+
+            Environment.SetEnvironmentVariable("PS_IMPORT_FOLDERS", "true");
+            var result = await Import(release);
+
+            Assert.That(result.Success, Is.True, result.Reason);
+            var landed = Path.Combine(Ps5, "FINAL FANTASY VII REMAKE [PPSA01903] [v1.10]");
+            Assert.That(File.Exists(Path.Combine(landed, "eboot.bin")), Is.True, "the app0 folder is flattened into the game folder");
+            Assert.That(File.Exists(Path.Combine(landed, "sce_sys", "param.json")), Is.True);
+        }
+
+        [Test]
+        public async Task SeveralImagesInOneFolder_AreNotGuessedAt()
+        {
+            Image("exfat/a.exfat");
+            Image("exfat/b.exfat");
+            var result = await Import(Path.Combine(_inbox, "exfat"));
+            Assert.That(result.Success, Is.False);
+            Assert.That(result.Reason, Does.Contain("recursive"));
+        }
+
+        [TestCase("Ghost.of.Yotei.PS5-DUPLEX", "Ghost of Yotei")]
+        [TestCase("250101 - Astro Bot [PPSA01234] [v1.05] [DUPLEX]", "Astro Bot")]
+        [TestCase("Marvels_Spider-Man_2_PPSA03016_v1.002", "Marvels Spider-Man 2")]
+        [TestCase("Black Myth Wukong PPSA23226-app0", "Black Myth Wukong")]
+        [TestCase("UP9000-PPSA26344_00-GHOST2SHIP000000", "")]
+        public void ReleaseNames_AreCleaned(string name, string title)
+        {
+            Assert.That(PlayStationImporter.CleanReleaseName(name), Is.EqualTo(title));
+        }
+
+        [Test]
+        public void Names_StayShort_AndCarryIdVersionAndKind()
+        {
+            var game = new PlayStationPackage(PlayStationFormat.ExfatImage, "PPSA01903", "01.010.000", null, null);
+            Assert.That(PlayStationImporter.BuildName("FF7 Remake", game, ".exfat"), Is.EqualTo("FF7 Remake [PPSA01903] [v1.10].exfat"));
+            var update = game with { Content = PlayStationContent.Update };
+            Assert.That(PlayStationImporter.BuildName("FF7", update, ".pkg"), Is.EqualTo("FF7 [PPSA01903] [Update] [v1.10].pkg"));
+            var name = PlayStationImporter.BuildName(new string('A', 300), game, ".exfat");
+            Assert.That(Encoding.UTF8.GetByteCount(name), Is.LessThanOrEqualTo(120));
+            Assert.That(name, Does.EndWith(" [PPSA01903] [v1.10].exfat"));
+            Assert.That(PlayStationImporter.SafeTitle("FINAL FANTASY VII REMAKE™: Intergrade"), Is.EqualTo("FINAL FANTASY VII REMAKE Intergrade"));
+        }
+    }
+}
