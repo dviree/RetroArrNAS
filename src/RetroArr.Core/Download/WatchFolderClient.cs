@@ -263,7 +263,7 @@ namespace RetroArr.Core.Download
             {
                 Games.PlayStationFormat.Unknown => "not imported, no game, image or package found",
                 Games.PlayStationFormat.Folder or Games.PlayStationFormat.Lz4Folder when !PlayStationImporter.ImportFolders =>
-                    "left for the converter (PS_IMPORT_FOLDERS=true imports game folders)",
+                    "left for the converter (PS_IMPORT_FOLDERS=false)",
                 _ => null
             };
             var settled = DateTime.UtcNow - files.Max(f => f.LastWriteTimeUtc) >= PlayStationSettleTime
@@ -318,7 +318,16 @@ namespace RetroArr.Core.Download
         private static Kind Classify(DirectoryInfo dir, int depth)
         {
             if (depth >= MaxDepth) return Kind.Game;
-            if (File.Exists(Path.Combine(dir.FullName, "eboot.bin")) || Directory.Exists(Path.Combine(dir.FullName, "sce_sys"))) return Kind.Game;
+            static bool IsPlayStationRoot(DirectoryInfo d) => File.Exists(Path.Combine(d.FullName, "eboot.bin")) || Directory.Exists(Path.Combine(d.FullName, "sce_sys"));
+            if (IsPlayStationRoot(dir)) return Kind.Game;
+            // A release folder around one PPSA01234-app0 folder is the game, so its name and leftovers go with it
+            try
+            {
+                var subs = dir.EnumerateDirectories().Where(d => !d.Name.StartsWith('.')).ToList();
+                if (subs.Count == 1 && IsPlayStationRoot(subs[0])
+                    && Regex.IsMatch(subs[0].Name, @"(?i)(app0|^(PPSA|CUSA)[-_]?\d{5})")) return Kind.Game;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
             var files = dir.EnumerateFiles().Where(f => !f.Name.StartsWith('.') && !JunkExtensions.Contains(f.Extension)
                 && !MediaExtensions.Contains(f.Extension)).ToList();
             if (files.Count == 0) return Kind.Collection;

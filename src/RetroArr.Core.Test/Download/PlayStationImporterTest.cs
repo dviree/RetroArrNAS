@@ -128,7 +128,7 @@ namespace RetroArr.Core.Test.Download
         }
 
         [Test]
-        public async Task GameFolder_IsLeftForTheConverter_UnlessFoldersAreImported()
+        public async Task GameFolder_IsImported_UnlessLeftForAConverter()
         {
             var folder = Directory.CreateDirectory(Path.Combine(_inbox, "Release", "PPSA01903-app0")).FullName;
             File.WriteAllText(Path.Combine(folder, "eboot.bin"), "x");
@@ -136,9 +136,10 @@ namespace RetroArr.Core.Test.Download
             File.WriteAllText(Path.Combine(folder, "sce_sys", "param.json"), PlayStationReadersTest.ParamJson);
             var release = Path.Combine(_inbox, "Release");
 
+            Environment.SetEnvironmentVariable("PS_IMPORT_FOLDERS", "false");
             Assert.That((await Import(release)).Reason, Does.Contain("converter"));
 
-            Environment.SetEnvironmentVariable("PS_IMPORT_FOLDERS", "true");
+            Environment.SetEnvironmentVariable("PS_IMPORT_FOLDERS", null);
             var result = await Import(release);
 
             Assert.That(result.Success, Is.True, result.Reason);

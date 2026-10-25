@@ -154,6 +154,18 @@ namespace RetroArr.Core.Test.Download
         }
 
         [Test]
+        public async Task Recursive_ReleaseFolderAroundAnApp0Folder_IsTheGame()
+        {
+            Write("extracted/261025 - Stray [PPSA01234] [DLPSGAME]/PPSA01234-app0/eboot.bin");
+            Write("extracted/261025 - Stray [PPSA01234] [DLPSGAME]/PPSA01234-app0/sce_sys/param.json", "{}");
+            Write("extracted/261025 - Stray [PPSA01234] [DLPSGAME]/info.nfo");
+            Write("extracted/Formoreupscales.html");
+            var download = (await new WatchFolderClient(_root, null, recursive: true).GetDownloadsAsync()).Single();
+            Assert.That(download.Name, Is.EqualTo("261025 - Stray [PPSA01234] [DLPSGAME]"));
+            Assert.That((download.State, download.PlatformFolder), Is.EqualTo((DownloadState.Completed, "ps5")), "game folders are imported by default");
+        }
+
+        [Test]
         public async Task HiddenWorkFoldersAndEmptyFolders_AreSkipped()
         {
             Write(".gamesauce-work/job/game.wbfs");

@@ -53,11 +53,11 @@ namespace RetroArr.Core.Download
         }
 
         /// <summary>
-        /// Uncompressed and LZ4 game folders are imported only when PS_IMPORT_FOLDERS=true: by default they are left where
-        /// they are for the converter that turns them into exFAT/FFPFSC images, and the images are what gets imported.
+        /// Uncompressed and LZ4 game folders are imported like images. PS_IMPORT_FOLDERS=false leaves them where they are
+        /// for a converter that turns them into exFAT/FFPFSC images, and only the images are imported.
         /// </summary>
         public static bool ImportFolders =>
-            string.Equals(Environment.GetEnvironmentVariable("PS_IMPORT_FOLDERS"), "true", StringComparison.OrdinalIgnoreCase);
+            !string.Equals(Environment.GetEnvironmentVariable("PS_IMPORT_FOLDERS"), "false", StringComparison.OrdinalIgnoreCase);
 
         public static bool IsPlayStation(string? platformFolder) =>
             string.Equals(platformFolder, "ps5", StringComparison.OrdinalIgnoreCase) || string.Equals(platformFolder, "ps4", StringComparison.OrdinalIgnoreCase);
@@ -155,7 +155,7 @@ namespace RetroArr.Core.Download
                 case PlayStationFormat.Unknown:
                     return Outcome.Fail("No PlayStation game, image or package found");
                 case PlayStationFormat.Folder or PlayStationFormat.Lz4Folder when !importFolders:
-                    return Outcome.Fail("Game folder left for the converter (set PS_IMPORT_FOLDERS=true to import folders)");
+                    return Outcome.Fail("Game folder left for the converter (PS_IMPORT_FOLDERS=false)");
             }
 
             var isFolderGame = package.Format is PlayStationFormat.Folder or PlayStationFormat.Lz4Folder;
