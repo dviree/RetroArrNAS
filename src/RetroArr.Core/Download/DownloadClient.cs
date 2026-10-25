@@ -19,6 +19,8 @@ namespace RetroArr.Core.Download
         public string? ApiKey { get; set; }
         public bool Enable { get; set; } = true;
         public bool UseSsl { get; set; }
+        // Watch folder only: delete a game's source once every file is verified in the library
+        public bool DeleteSourceAfterImport { get; set; }
         public int Priority { get; set; }
         
         // Remote Path Mapping

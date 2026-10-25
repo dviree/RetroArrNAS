@@ -166,6 +166,83 @@ namespace RetroArr.Core.Test.Download
             return (processor, library, source);
         }
 
+        private async Task<(PostDownloadProcessor Processor, string Library, string Source)> WatchFolderSetup(bool move, IFileMoverService? mover = null)
+        {
+            var (processor, library, source) = await TorrentSetup(new PostDownloadSettings { EnableAutoMove = true }, mover, WatchFolderClient.ImplementationName);
+            var config = new ConfigurationService(_root);
+            config.SaveDownloadClients(new List<DownloadClient>
+            {
+                new DownloadClient { Id = 1, Name = "inbox", Implementation = WatchFolderClient.ImplementationName, DeleteSourceAfterImport = move }
+            });
+            File.WriteAllText(Path.Combine(source, "game.iso"), "iso-data");
+            Directory.CreateDirectory(Path.Combine(source, "extra"));
+            File.WriteAllText(Path.Combine(source, "extra", "manual.pdf"), "pdf");
+            return (processor, library, source);
+        }
+
+        [Test]
+        public async Task WatchFolder_InMoveMode_RemovesTheSource_OnceEveryFileIsInTheLibrary()
+        {
+            var (processor, library, source) = await WatchFolderSetup(move: true);
+
+            var result = await processor.ProcessCompletedDownloadAsync(Torrent(source));
+
+            Assert.That(result.Success, Is.True, result.Reason);
+            Assert.That(Directory.EnumerateFiles(library, "*", SearchOption.AllDirectories).Count(), Is.EqualTo(2));
+            Assert.That(Directory.Exists(source), Is.False, "verified source should be gone");
+        }
+
+        [Test]
+        public async Task WatchFolder_WithoutMoveMode_KeepsTheSource()
+        {
+            var (processor, _, source) = await WatchFolderSetup(move: false);
+
+            var result = await processor.ProcessCompletedDownloadAsync(Torrent(source));
+
+            Assert.That(result.Success, Is.True, result.Reason);
+            Assert.That(File.Exists(Path.Combine(source, "game.iso")), Is.True);
+        }
+
+        // Copies everything but one file, as a copy cut short would
+        private sealed class DropsManualMover : IFileMoverService
+        {
+            private readonly FileMoverService _inner = new();
+            public bool ImportFile(string sourceFile, string destinationFile) => ImportFile(sourceFile, destinationFile, out _);
+            public bool ImportFile(string sourceFile, string destinationFile, out string? failureReason)
+            {
+                if (sourceFile.EndsWith("manual.pdf", StringComparison.Ordinal))
+                {
+                    File.WriteAllText(destinationFile, "p");
+                    failureReason = null;
+                    return true;
+                }
+                return _inner.ImportFile(sourceFile, destinationFile, out failureReason);
+            }
+        }
+
+        [Test]
+        public async Task WatchFolder_InMoveMode_KeepsTheSource_WhenAFileInTheLibraryIsShort()
+        {
+            var (processor, _, source) = await WatchFolderSetup(move: true, new DropsManualMover());
+
+            await processor.ProcessCompletedDownloadAsync(Torrent(source));
+
+            Assert.That(File.Exists(Path.Combine(source, "game.iso")), Is.True);
+            Assert.That(File.Exists(Path.Combine(source, "extra", "manual.pdf")), Is.True);
+        }
+
+        [Test]
+        public void VerifiedRemoval_RefusesASourceHoldingTheLibraryFolder()
+        {
+            var source = Directory.CreateDirectory(Path.Combine(_root, "inbox", "Game")).FullName;
+            File.WriteAllText(Path.Combine(source, "game.iso"), "x");
+            var inside = Directory.CreateDirectory(Path.Combine(source, "library")).FullName;
+            File.WriteAllText(Path.Combine(inside, "game.iso"), "x");
+
+            Assert.That(PostDownloadProcessor.RemoveVerifiedSource(source, inside, null), Is.False);
+            Assert.That(Directory.Exists(source), Is.True);
+        }
+
         private static void Zip(string archive, params (string Entry, string Content)[] files)
         {
             using var zip = ZipFile.Open(archive, ZipArchiveMode.Create);

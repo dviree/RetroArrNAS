@@ -99,6 +99,7 @@ namespace RetroArr.Api.V3.DownloadClients
             existingClient.ApiKey = KeepSecret(client.ApiKey, existingClient.ApiKey);
             existingClient.Enable = client.Enable;
             existingClient.Priority = client.Priority;
+            existingClient.DeleteSourceAfterImport = client.DeleteSourceAfterImport;
             existingClient.RemotePathMapping = client.RemotePathMapping;
             existingClient.LocalPathMapping = client.LocalPathMapping;
 
@@ -132,6 +133,9 @@ namespace RetroArr.Api.V3.DownloadClients
 
             _clients.Remove(client);
             _configService.SaveDownloadClients(_clients);
+            // A client added later can get the same id; it must not find this one's downloads already imported
+            foreach (var tracked in _trackedDownloadService.GetTrackedDownloads().Where(t => t.DownloadClientId == id).ToList())
+                _trackedDownloadService.StopTracking(id, tracked.DownloadId);
             return NoContent();
         }
 

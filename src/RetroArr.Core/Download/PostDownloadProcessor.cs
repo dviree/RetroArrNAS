@@ -63,7 +63,9 @@ namespace RetroArr.Core.Download
 
             // A torrent client keeps seeding from the download folder, so nothing in it
             // gets deleted. Files the cleanup would have removed are skipped on import instead.
-            var keep = IsTorrentDownload(download) ? new HashSet<string>() : null;
+            // A watch folder in move mode is kept like a torrent during the import and only removed once verified below
+            var moveAfterImport = IsWatchFolderMove(download);
+            var keep = IsTorrentDownload(download) || moveAfterImport ? new HashSet<string>() : null;
 
             // 1. Auto-Extract
             List<string>? extractionFailures = null;
@@ -93,6 +95,8 @@ namespace RetroArr.Core.Download
             if (settings.EnableAutoMove)
             {
                 var result = await AutoMoveToLibrary(download, keep, extracted);
+                if (result.Success && moveAfterImport)
+                    RemoveVerifiedSource(download.DownloadPath!, result.DestinationPath, keep);
                 // Extracted files aren't part of the torrent and the library has its own copy by now
                 if (extracted?.Count > 0)
                 {
@@ -1464,8 +1468,48 @@ namespace RetroArr.Core.Download
 
         private bool IsTorrentDownload(DownloadStatus download)
         {
-            var implementation = _configService.LoadDownloadClients().FirstOrDefault(c => c.Id == download.ClientId)?.Implementation;
-            return KeepSourceClients.Contains(implementation, StringComparer.OrdinalIgnoreCase);
+            var client = _configService.LoadDownloadClients().FirstOrDefault(c => c.Id == download.ClientId);
+            return KeepSourceClients.Contains(client?.Implementation, StringComparer.OrdinalIgnoreCase) && !IsMoveMode(client);
+        }
+
+        private bool IsWatchFolderMove(DownloadStatus download) =>
+            IsMoveMode(_configService.LoadDownloadClients().FirstOrDefault(c => c.Id == download.ClientId));
+
+        private static bool IsMoveMode(DownloadClient? client) =>
+            client != null && client.DeleteSourceAfterImport
+            && client.Implementation.Equals(WatchFolderClient.ImplementationName, StringComparison.OrdinalIgnoreCase);
+
+        // Removes a watch folder's game only when every file in it has a twin of the same size in the library,
+        // so a copy cut short or a file the import skipped keeps the whole source
+        internal static bool RemoveVerifiedSource(string source, string? destination, HashSet<string>? skipped)
+        {
+            if (string.IsNullOrEmpty(destination)) return false;
+            var libraryFolder = Directory.Exists(destination) ? destination : Path.GetDirectoryName(destination);
+            if (string.IsNullOrEmpty(libraryFolder) || !Directory.Exists(libraryFolder)) return false;
+            var sourceFiles = Directory.Exists(source)
+                ? Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories).ToList()
+                : File.Exists(source) ? new List<string> { source } : new List<string>();
+            if (sourceFiles.Count == 0 || IsUnder(Path.GetFullPath(libraryFolder), FullDir(source))) return false;
+            // By size, each library file standing in for one source file: the import may rename (Game.iso -> Title.iso)
+            var landed = Directory.EnumerateFiles(libraryFolder, "*", SearchOption.AllDirectories)
+                .GroupBy(f => new FileInfo(f).Length).ToDictionary(g => g.Key, g => g.Count());
+            var missing = new List<string>();
+            foreach (var f in sourceFiles)
+            {
+                var size = new FileInfo(f).Length;
+                if ((skipped?.Contains(f) ?? false) || !landed.TryGetValue(size, out var left) || left == 0)
+                    missing.Add(f);
+                else
+                    landed[size] = left - 1;
+            }
+            if (missing.Count > 0)
+            {
+                _logger.Warn($"[PostDownload] Keeping source, {missing.Count} file(s) not verified in {libraryFolder}, e.g. {missing[0]}");
+                return false;
+            }
+            _logger.Info($"[PostDownload] All {sourceFiles.Count} file(s) verified in {libraryFolder}, removing source {source}");
+            DeleteSource(source, null);
+            return !File.Exists(source) && !Directory.Exists(source);
         }
 
         // Moves nothing if any file would land on something that isn't ours (only files an earlier
