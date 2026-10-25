@@ -37,6 +37,7 @@ namespace RetroArr.Core.Test.Download
         public void TearDown()
         {
             Environment.SetEnvironmentVariable("PS_IMPORT_FOLDERS", null);
+            Environment.SetEnvironmentVariable("PS_LIBRARY_EXTRA", null);
             Directory.Delete(_root, true);
         }
 
@@ -216,6 +217,61 @@ namespace RetroArr.Core.Test.Download
             var result = await Import(path);
             Assert.That(result.Success, Is.False);
             Assert.That(Directory.Exists(Ps5) ? Directory.GetFileSystemEntries(Ps5) : Array.Empty<string>(), Is.Empty);
+        }
+
+        [Test]
+        public async Task ArchiveOfAGameTheLibraryHas_IsNotEvenUnpacked()
+        {
+            Directory.CreateDirectory(Ps5);
+            File.WriteAllText(Path.Combine(Ps5, "FINAL FANTASY VII REMAKE [PPSA01903] [v1.10].ffpfsc"), "there");
+            var archive = Zip("FF7R [PPSA01903]/ff7r.zip", ("ff7r.exfat", new byte[100]));
+            var extracted = 0;
+            _importer.FreeSpace = _ => { extracted++; return long.MaxValue; };
+
+            var result = await Import(Path.GetDirectoryName(archive)!);
+
+            Assert.That(result.Success, Is.True, result.Reason);
+            Assert.That(result.Destination, Does.EndWith(".ffpfsc"));
+            Assert.That(extracted, Is.EqualTo(0), "no space check, so no unpacking was even started");
+            Assert.That(Directory.GetFiles(Ps5), Has.Length.EqualTo(1));
+        }
+
+        [Test]
+        public async Task GameInTheLz4Library_IsNotCopied()
+        {
+            var lz4 = Directory.CreateDirectory(Path.Combine(_root, "ps5-lz4", "FINAL FANTASY VII REMAKE PPSA01903 v1.10")).FullName;
+            Environment.SetEnvironmentVariable("PS_LIBRARY_EXTRA", Path.GetDirectoryName(lz4));
+
+            var result = await Import(Image("ff7r.exfat"));
+
+            Assert.That(result.Success, Is.True, result.Reason);
+            Assert.That(result.Destination, Is.EqualTo(lz4));
+            Assert.That(Directory.Exists(Ps5) ? Directory.GetFiles(Ps5) : Array.Empty<string>(), Is.Empty);
+        }
+
+        [Test]
+        public async Task OlderGameInTheLz4Library_DoesNotStopANewerOne_AndIsLeftAlone()
+        {
+            var lz4 = Directory.CreateDirectory(Path.Combine(_root, "ps5-lz4", "FF7R [PPSA01903] [v1.0]")).FullName;
+            Environment.SetEnvironmentVariable("PS_LIBRARY_EXTRA", Path.GetDirectoryName(lz4));
+
+            var result = await Import(Image("ff7r.exfat", "02.000.000"));
+
+            Assert.That(result.Success, Is.True, result.Reason);
+            Assert.That(Directory.GetFiles(Ps5).Single(), Does.EndWith("[v2.0].exfat"));
+            Assert.That(Directory.Exists(lz4), Is.True, "another library is never changed");
+        }
+
+        [Test]
+        public async Task SameVersionInAnotherFormat_IsNotStoredTwice()
+        {
+            Directory.CreateDirectory(Ps5);
+            File.WriteAllText(Path.Combine(Ps5, "FINAL FANTASY VII REMAKE [PPSA01903] [v1.10].ffpfsc"), "lz4");
+
+            var result = await Import(Image("ff7r.exfat"));
+
+            Assert.That(result.Success, Is.True, result.Reason);
+            Assert.That(Directory.GetFiles(Ps5), Has.Length.EqualTo(1));
         }
 
         [TestCase("Ghost.of.Yotei.PS5-DUPLEX", "Ghost of Yotei")]

@@ -65,9 +65,17 @@ namespace RetroArr.Core.Download
         public Task<Outcome> ImportAsync(string source, string releaseName, string libraryRoot, string platformFolder)
         {
             var package = PlayStationPackageInspector.Inspect(source);
-            return package.Format == PlayStationFormat.Archive
-                ? ImportArchiveAsync(source, releaseName, libraryRoot, platformFolder)
-                : ImportOneAsync(source, releaseName, libraryRoot, platformFolder, ImportFolders);
+            if (package.Format == PlayStationFormat.Archive)
+            {
+                var there = AlreadyThere(Path.Combine(libraryRoot, platformFolder), package, releaseName);
+                if (there != null)
+                {
+                    _logger.Info($"[PlayStation] {releaseName}: {package.TitleId} is already in {there}, nothing unpacked");
+                    return Task.FromResult(new Outcome(true, there, null));
+                }
+                return ImportArchiveAsync(source, releaseName, libraryRoot, platformFolder);
+            }
+            return ImportOneAsync(source, releaseName, libraryRoot, platformFolder, ImportFolders);
         }
 
         private static readonly Regex ArchiveFile = new(@"\.(rar|7z|zip|001)$", RegexOptions.IgnoreCase);
@@ -167,7 +175,8 @@ namespace RetroArr.Core.Download
             var name = BuildName(title, package, extension);
             var target = Path.Combine(folder, name);
 
-            // The same game already in the library: a newer or equal version keeps its place, an older one is replaced
+            // The same game already in the library: a newer or equal version keeps its place, an older one is replaced.
+            // An equal version in another format (exFAT next to FFPFSC) counts as there; nothing is stored twice.
             var older = new List<string>();
             foreach (var existing in SameGame(folder, package, name))
             {
@@ -177,16 +186,24 @@ namespace RetroArr.Core.Download
                     && string.Equals(Path.GetExtension(existing), extension, StringComparison.OrdinalIgnoreCase);
                 if (compare > 0)
                     return Outcome.Fail($"The library already has a newer version: {Path.GetFileName(existing)}");
-                if (compare == 0 && sameKind)
+                if (compare == 0 && sameKind && SizeOf(existing) == SizeOf(from))
                 {
-                    if (SizeOf(existing) == SizeOf(from))
-                    {
-                        _logger.Info($"[PlayStation] {releaseName} is already in the library as {existing}");
-                        return new Outcome(true, existing, null, title, from);
-                    }
-                    return Outcome.Fail($"The same version is already in the library with a different size: {Path.GetFileName(existing)}");
+                    _logger.Info($"[PlayStation] {releaseName} is already in the library as {existing}");
+                    return new Outcome(true, existing, null, title, from);
                 }
-                if (compare < 0) older.Add(existing);
+                if (compare == 0)
+                {
+                    _logger.Info($"[PlayStation] {releaseName}: the same version is already in the library as {existing}, not stored twice");
+                    return new Outcome(true, existing, null, title);
+                }
+                older.Add(existing);
+            }
+            // The other PlayStation libraries (the LZ4 one) are only looked at, never changed
+            var elsewhere = InOtherLibraries(package).FirstOrDefault(e => PlayStationPackageInspector.CompareVersions(VersionIn(Path.GetFileName(e)) ?? VersionInName(Path.GetFileName(e)), package.Version) >= 0);
+            if (elsewhere != null)
+            {
+                _logger.Info($"[PlayStation] {releaseName} is already in {elsewhere}, not copied");
+                return new Outcome(true, elsewhere, null, title);
             }
             if (File.Exists(target) || Directory.Exists(target))
                 return Outcome.Fail($"{name} is already in the library and is not the same release");
@@ -283,13 +300,62 @@ namespace RetroArr.Core.Download
         {
             if (package.TitleId == null || package.Content == PlayStationContent.Dlc)
                 return Directory.EnumerateFileSystemEntries(folder).Where(p => Path.GetFileName(p).Equals(name, StringComparison.OrdinalIgnoreCase));
-            var tag = "[" + package.TitleId + "]";
-            return Directory.EnumerateFileSystemEntries(folder).Where(p =>
+            return Directory.EnumerateFileSystemEntries(folder).Where(p => SameKind(Path.GetFileName(p), package)).ToList();
+        }
+
+        private static bool SameKind(string entryName, PlayStationPackage package)
+        {
+            if (entryName.StartsWith('.') || PlayStationPackageInspector.TitleIdIn(entryName) != package.TitleId) return false;
+            if (Regex.IsMatch(entryName, @"(?<![A-Za-z])DLC(?![A-Za-z])", RegexOptions.IgnoreCase)) return false;
+            var isUpdate = Regex.IsMatch(entryName, @"(?<![A-Za-z])(update|patch)(?![A-Za-z])", RegexOptions.IgnoreCase);
+            return isUpdate == (package.Content == PlayStationContent.Update);
+        }
+
+        /// <summary>
+        /// Other folders holding PlayStation games, as PS_LIBRARY_EXTRA lists them (comma separated container paths, like
+        /// the LZ4 library): a game found there by title ID is not copied into the library again.
+        /// </summary>
+        internal static IReadOnlyList<string> OtherLibraries =>
+            (Environment.GetEnvironmentVariable("PS_LIBRARY_EXTRA") ?? string.Empty)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+        private static IEnumerable<string> InOtherLibraries(PlayStationPackage package)
+        {
+            if (package.TitleId == null || package.Content == PlayStationContent.Dlc) yield break;
+            foreach (var library in OtherLibraries.Where(Directory.Exists))
             {
-                var n = Path.GetFileName(p);
-                if (n.StartsWith('.') || !n.Contains(tag, StringComparison.OrdinalIgnoreCase) || n.Contains("[DLC", StringComparison.OrdinalIgnoreCase)) return false;
-                return n.Contains("[Update]", StringComparison.OrdinalIgnoreCase) == (package.Content == PlayStationContent.Update);
-            }).ToList();
+                List<string> entries;
+                try
+                {
+                    // The games themselves, or one level down when the library sorts them into folders
+                    entries = Directory.EnumerateFileSystemEntries(library).ToList();
+                    entries.AddRange(entries.Where(Directory.Exists).Where(d => PlayStationPackageInspector.TitleIdIn(Path.GetFileName(d)).Length == 0)
+                        .SelectMany(d => Directory.EnumerateFileSystemEntries(d)).ToList());
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _logger.Warn($"[PlayStation] Cannot read {library}: {ex.Message}");
+                    continue;
+                }
+                foreach (var e in entries.Where(e => SameKind(Path.GetFileName(e), package))) yield return e;
+            }
+        }
+
+        // "v1.05", "v01.010.000", "A0105-V0100" style versions in a release or library name
+        private static readonly Regex NameVersion = new(@"(?<![A-Za-z0-9])v(\d+(?:\.\d+)+)(?![\d.])", RegexOptions.IgnoreCase);
+        internal static string? VersionInName(string? name) => NameVersion.Match(name ?? string.Empty) is { Success: true } m ? m.Groups[1].Value : null;
+
+        /// <summary>
+        /// Before unpacking: a release whose title ID the library (or another PS library) already has in this or a
+        /// newer version is skipped, so nothing is unpacked or copied for a game that is already there.
+        /// </summary>
+        internal static string? AlreadyThere(string folder, PlayStationPackage package, string releaseName)
+        {
+            if (package.TitleId == null || package.Content != PlayStationContent.Game) return null;
+            var version = package.Version ?? VersionInName(releaseName);
+            var here = Directory.Exists(folder) ? SameGame(folder, package, string.Empty) : Enumerable.Empty<string>();
+            return here.Concat(InOtherLibraries(package))
+                .FirstOrDefault(e => PlayStationPackageInspector.CompareVersions(VersionIn(Path.GetFileName(e)) ?? VersionInName(Path.GetFileName(e)), version) >= 0);
         }
 
         private string? CopyFile(string from, string to)
