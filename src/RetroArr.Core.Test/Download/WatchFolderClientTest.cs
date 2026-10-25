@@ -103,12 +103,11 @@ namespace RetroArr.Core.Test.Download
         }
 
         [Test]
-        public async Task PlayStationArchive_IsHeldBack()
+        public async Task PlayStationArchive_IsImported_OnceStill()
         {
             Write("Ghost of Yotei [PPSA12345]/ghost.part01.rar");
             var download = (await List()).Single();
-            Assert.That(download.State, Is.EqualTo(DownloadState.Paused), "a held-back release is never imported");
-            Assert.That(download.StatusMessages.Single(), Does.Contain("not built yet"));
+            Assert.That((download.State, download.PlatformFolder), Is.EqualTo((DownloadState.Completed, "ps5")));
         }
 
         [Test]

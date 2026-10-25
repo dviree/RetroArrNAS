@@ -27,7 +27,9 @@ namespace RetroArr.Core.Download
         private const int MaxNameBytes = 120;
         private const string StagingPrefix = ".retroarr-ps-";
 
-        public sealed record Outcome(bool Success, string? Destination, string? Reason, string? Title = null, string? VerifyFrom = null)
+        // Unpacked: the release was an archive, unpacked to staging and imported from there; the archive itself
+        // has no twin in the library to verify against, a clean unpack and import is its verification
+        public sealed record Outcome(bool Success, string? Destination, string? Reason, string? Title = null, string? VerifyFrom = null, bool Unpacked = false)
         {
             public static Outcome Fail(string reason) => new(false, null, reason);
         }
@@ -35,12 +37,19 @@ namespace RetroArr.Core.Download
         private readonly IFileMoverService _mover;
         private readonly AiTitleService? _ai;
         private readonly TrashService? _trash;
+        private readonly IArchiveService? _archives;
+        private readonly string _staging;
 
-        public PlayStationImporter(IFileMoverService mover, AiTitleService? ai = null, TrashService? trash = null)
+        // internal for tests: a full volume
+        internal Func<string, long> FreeSpace = path => new DriveInfo(path).AvailableFreeSpace;
+
+        public PlayStationImporter(IFileMoverService mover, AiTitleService? ai = null, TrashService? trash = null, IArchiveService? archives = null, string? staging = null)
         {
             _mover = mover;
             _ai = ai;
             _trash = trash;
+            _archives = archives;
+            _staging = staging ?? Environment.GetEnvironmentVariable("PS_STAGING") ?? "/temp/retroarr-ps";
         }
 
         /// <summary>
@@ -53,16 +62,91 @@ namespace RetroArr.Core.Download
         public static bool IsPlayStation(string? platformFolder) =>
             string.Equals(platformFolder, "ps5", StringComparison.OrdinalIgnoreCase) || string.Equals(platformFolder, "ps4", StringComparison.OrdinalIgnoreCase);
 
-        public async Task<Outcome> ImportAsync(string source, string releaseName, string libraryRoot, string platformFolder)
+        public Task<Outcome> ImportAsync(string source, string releaseName, string libraryRoot, string platformFolder)
+        {
+            var package = PlayStationPackageInspector.Inspect(source);
+            return package.Format == PlayStationFormat.Archive
+                ? ImportArchiveAsync(source, releaseName, libraryRoot, platformFolder)
+                : ImportOneAsync(source, releaseName, libraryRoot, platformFolder, ImportFolders);
+        }
+
+        private static readonly Regex ArchiveFile = new(@"\.(rar|7z|zip|001)$", RegexOptions.IgnoreCase);
+        private static readonly Regex LaterRarPart = new(@"\.part0*([2-9]|\d{2,})\.rar$", RegexOptions.IgnoreCase);
+
+        /// <summary>
+        /// Unpacks every archive set in the release (first volumes only) into staging, imports what came out,
+        /// and removes the staging folder again. The archives themselves are only read.
+        /// </summary>
+        private async Task<Outcome> ImportArchiveAsync(string source, string releaseName, string libraryRoot, string platformFolder)
+        {
+            if (_archives == null) return Outcome.Fail("PlayStation archive: no archive support configured");
+            var all = Directory.Exists(source)
+                ? Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories).ToList()
+                : new List<string> { source };
+            var firsts = all.Where(f => ArchiveFile.IsMatch(f) && !LaterRarPart.IsMatch(f)).OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
+            if (firsts.Count == 0) return Outcome.Fail("PlayStation archive: no first volume found");
+
+            var needed = all.Where(f => ArchiveFile.IsMatch(f) || Regex.IsMatch(f, @"\.(r\d\d|\d{3})$", RegexOptions.IgnoreCase)).Sum(f => new FileInfo(f).Length);
+            Directory.CreateDirectory(_staging);
+            var free = FreeSpace(_staging);
+            if (free < needed + needed / 20)
+                return Outcome.Fail($"Not enough space to unpack: {needed / 1_000_000_000.0:0.0} GB needed in {_staging}, {free / 1_000_000_000.0:0.0} GB free");
+
+            var work = Path.Combine(_staging, Guid.NewGuid().ToString("N")[..12]);
+            try
+            {
+                for (int i = 0; i < firsts.Count; i++)
+                {
+                    var into = Path.Combine(work, i.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    _logger.Info($"[PlayStation] Unpacking {firsts[i]} -> {into}");
+                    if (!await Task.Run(() => _archives.Extract(firsts[i], into)))
+                        return Outcome.Fail($"Could not unpack {Path.GetFileName(firsts[i])} (damaged, incomplete or password protected)");
+                }
+
+                var found = Importables(work).ToList();
+                if (found.Count == 0) return Outcome.Fail("The archive holds no PlayStation game, image or package");
+                Outcome? first = null;
+                foreach (var item in found)
+                {
+                    // An unpacked folder is in staging, out of the converter's way: it is imported as it is
+                    var name = item == work ? releaseName : Path.GetFileName(item);
+                    var outcome = await ImportOneAsync(item, found.Count == 1 ? releaseName : name, libraryRoot, platformFolder, true);
+                    if (!outcome.Success) return outcome with { Reason = $"{Path.GetFileName(item)}: {outcome.Reason}" };
+                    first ??= outcome;
+                }
+                return first! with { VerifyFrom = null, Unpacked = true };
+            }
+            finally
+            {
+                try { if (Directory.Exists(work)) Directory.Delete(work, true); }
+                catch (Exception ex) { _logger.Warn($"[PlayStation] Could not remove staging folder {work}: {ex.Message}"); }
+            }
+        }
+
+        // Game folders (eboot.bin + sce_sys) and image/package files in an unpacked archive
+        private static IEnumerable<string> Importables(string root)
+        {
+            var folders = Directory.EnumerateFiles(root, "eboot.bin", SearchOption.AllDirectories)
+                .Select(Path.GetDirectoryName).Where(d => d != null && Directory.Exists(Path.Combine(d, "sce_sys"))).Select(d => d!).ToList();
+            foreach (var folder in folders) yield return folder;
+            foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+            {
+                var ext = Path.GetExtension(file).ToLowerInvariant();
+                if (ext is ".exfat" or ".ffpfsc" or ".pkg" && !folders.Any(f => file.StartsWith(f + Path.DirectorySeparatorChar, StringComparison.Ordinal)))
+                    yield return file;
+            }
+        }
+
+        private async Task<Outcome> ImportOneAsync(string source, string releaseName, string libraryRoot, string platformFolder, bool importFolders)
         {
             var package = PlayStationPackageInspector.Inspect(source);
             switch (package.Format)
             {
                 case PlayStationFormat.Archive:
-                    return Outcome.Fail("PlayStation archive: unpacking is not built yet, nothing was imported");
+                    return Outcome.Fail("An archive inside an archive is not unpacked");
                 case PlayStationFormat.Unknown:
                     return Outcome.Fail("No PlayStation game, image or package found");
-                case PlayStationFormat.Folder or PlayStationFormat.Lz4Folder when !ImportFolders:
+                case PlayStationFormat.Folder or PlayStationFormat.Lz4Folder when !importFolders:
                     return Outcome.Fail("Game folder left for the converter (set PS_IMPORT_FOLDERS=true to import folders)");
             }
 

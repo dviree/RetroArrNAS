@@ -203,7 +203,6 @@ namespace RetroArr.Core.Download
             var what = $"{platform.ToUpperInvariant()} {Describe(package)}";
             string? held = package.Format switch
             {
-                Games.PlayStationFormat.Archive => "not imported, unpacking PlayStation archives is not built yet",
                 Games.PlayStationFormat.Unknown => "not imported, no game, image or package found",
                 Games.PlayStationFormat.Folder or Games.PlayStationFormat.Lz4Folder when !PlayStationImporter.ImportFolders =>
                     "left for the converter (PS_IMPORT_FOLDERS=true imports game folders)",

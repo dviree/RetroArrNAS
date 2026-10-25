@@ -30,7 +30,7 @@ namespace RetroArr.Core.Test.Download
             var media = config.LoadMediaSettings();
             media.TrashPath = Path.Combine(_root, "bin");
             config.SaveMediaSettings(media);
-            _importer = new PlayStationImporter(new FileMoverService(), null, new TrashService(config));
+            _importer = new PlayStationImporter(new FileMoverService(), null, new TrashService(config), new ArchiveService(), Path.Combine(_root, "temp"));
         }
 
         [TearDown]
@@ -154,6 +154,68 @@ namespace RetroArr.Core.Test.Download
             var result = await Import(Path.Combine(_inbox, "exfat"));
             Assert.That(result.Success, Is.False);
             Assert.That(result.Reason, Does.Contain("recursive"));
+        }
+
+        private string Zip(string relative, params (string Entry, byte[] Content)[] entries)
+        {
+            var path = Path.Combine(_inbox, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            using var zip = System.IO.Compression.ZipFile.Open(path, System.IO.Compression.ZipArchiveMode.Create);
+            foreach (var (entry, content) in entries)
+            {
+                using var stream = zip.CreateEntry(entry).Open();
+                stream.Write(content);
+            }
+            return path;
+        }
+
+        [Test]
+        public async Task Archive_IsUnpackedToStaging_ImportedAndCleanedUp_WithTheArchiveUntouched()
+        {
+            var image = PlayStationReadersTest.ExFat(("sce_sys/param.json", Encoding.UTF8.GetBytes(PlayStationReadersTest.ParamJson)), ("eboot.bin", new byte[700]));
+            var archive = Zip("FF7R.PS5-DUPLEX/ff7r.zip", ("ff7r.exfat", image));
+            var before = File.ReadAllBytes(archive);
+
+            var result = await Import(Path.GetDirectoryName(archive)!);
+
+            Assert.That(result.Success, Is.True, result.Reason);
+            Assert.That(result.Unpacked, Is.True);
+            Assert.That(Directory.GetFiles(Ps5).Select(Path.GetFileName), Is.EqualTo(new[] { "FINAL FANTASY VII REMAKE [PPSA01903] [v1.10].exfat" }));
+            Assert.That(File.ReadAllBytes(archive), Is.EqualTo(before), "the archive is only read");
+            Assert.That(Directory.EnumerateFileSystemEntries(Path.Combine(_root, "temp")), Is.Empty, "staging is cleaned up");
+        }
+
+        [Test]
+        public async Task ArchivedGameFolder_IsImportedAsAFolder_SinceTheConverterNeverSeesStaging()
+        {
+            var archive = Zip("Astro.zip",
+                ("PPSA01903-app0/eboot.bin", new byte[10]),
+                ("PPSA01903-app0/sce_sys/param.json", Encoding.UTF8.GetBytes(PlayStationReadersTest.ParamJson)));
+
+            var result = await Import(archive);
+
+            Assert.That(result.Success, Is.True, result.Reason);
+            Assert.That(File.Exists(Path.Combine(Ps5, "FINAL FANTASY VII REMAKE [PPSA01903] [v1.10]", "eboot.bin")), Is.True);
+        }
+
+        [Test]
+        public async Task Archive_WithoutRoomToUnpack_IsLeftAlone()
+        {
+            var archive = Zip("Big.zip", ("x.exfat", new byte[100]));
+            _importer.FreeSpace = _ => 10;
+            var result = await Import(archive);
+            Assert.That(result.Success, Is.False);
+            Assert.That(result.Reason, Does.Contain("Not enough space"));
+        }
+
+        [Test]
+        public async Task DamagedArchive_FailsWithoutImporting()
+        {
+            var path = Path.Combine(_inbox, "Broken [PPSA01903].zip");
+            File.WriteAllText(path, "not a zip");
+            var result = await Import(path);
+            Assert.That(result.Success, Is.False);
+            Assert.That(Directory.Exists(Ps5) ? Directory.GetFileSystemEntries(Ps5) : Array.Empty<string>(), Is.Empty);
         }
 
         [TestCase("Ghost.of.Yotei.PS5-DUPLEX", "Ghost of Yotei")]

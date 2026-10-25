@@ -1526,11 +1526,11 @@ namespace RetroArr.Core.Download
                 : !string.IsNullOrEmpty(media.FolderPath) && Path.IsPathRooted(media.FolderPath) ? media.FolderPath : null;
             if (libraryRoot == null) return PostDownloadResult.Fail("Library path not configured.");
             var platformFolder = ResolvePlatformFolderName(download.PlatformFolder, media.FolderNamingMode) ?? download.PlatformFolder!;
-            var outcome = await new PlayStationImporter(_fileMover, _ai, _trash).ImportAsync(download.DownloadPath!, download.Name, libraryRoot, platformFolder);
+            var outcome = await new PlayStationImporter(_fileMover, _ai, _trash, _archiveService).ImportAsync(download.DownloadPath!, download.Name, libraryRoot, platformFolder);
             if (!outcome.Success) return PostDownloadResult.Fail(outcome.Reason ?? "PlayStation import failed");
             try { await AddMovedGameToLibraryAsync(outcome.Title ?? download.Name, outcome.Destination!, false, _metadataFactory.CreateService(), download.PlatformFolder, false); }
             catch (Exception ex) { _logger.Warn($"[PostDownload] {outcome.Destination} is in the library folder but not yet in the list, the next scan adds it: {ex.Message}"); }
-            if (moveAfterImport && outcome.VerifyFrom != null && SourceVerified(outcome.VerifyFrom, outcome.Destination, null))
+            if (moveAfterImport && (outcome.Unpacked || (outcome.VerifyFrom != null && SourceVerified(outcome.VerifyFrom, outcome.Destination, null))))
                 await RetireSourceAsync(download.DownloadPath!, download.Name);
             return PostDownloadResult.Ok(outcome.Destination);
         }
