@@ -148,15 +148,30 @@ namespace RetroArr.Core.Download
         public Task<List<DownloadStatus>> GetDownloadsAsync() => Task.Run(() =>
         {
             var key = $"{_folder}|{_recursive}|{_category}";
-            lock (_scanLocks.GetOrAdd(key, _ => new object()))
+            var gate = _scanLocks.GetOrAdd(key, _ => new object());
+            // A first scan of a terabyte folder takes a while: meanwhile the queue page gets the last result instead of hanging
+            if (!System.Threading.Monitor.TryEnter(gate, ScanWait))
+            {
+                return _listed.TryGetValue(key, out var stale) ? stale.Downloads.Select(Copy).ToList() : new List<DownloadStatus>();
+            }
+            try
             {
                 if (_listed.TryGetValue(key, out var hit) && DateTime.UtcNow - hit.At < ListCacheTime)
                     return hit.Downloads.Select(Copy).ToList();
+                var watch = System.Diagnostics.Stopwatch.StartNew();
                 var downloads = Scan();
+                if (watch.Elapsed > TimeSpan.FromSeconds(10) || !_listed.ContainsKey(key))
+                    _logger.Info($"[WatchFolder] {_folder}: {downloads.Count} release(s) in {watch.Elapsed.TotalSeconds:0.0}s");
                 _listed[key] = (DateTime.UtcNow, downloads);
                 return downloads.Select(Copy).ToList();
             }
+            finally
+            {
+                System.Threading.Monitor.Exit(gate);
+            }
         });
+
+        internal static TimeSpan ScanWait = TimeSpan.FromSeconds(5);
 
         // Callers fill in client fields on what they get, so each gets its own objects
         private static DownloadStatus Copy(DownloadStatus d) => new()
@@ -182,8 +197,11 @@ namespace RetroArr.Core.Download
             {
                 try
                 {
+                    var started = DateTime.UtcNow;
                     var status = Describe(entry);
                     if (status != null) result.Add(status);
+                    if (DateTime.UtcNow - started > TimeSpan.FromSeconds(30))
+                        _logger.Warn($"[WatchFolder] {entry.FullName} took {(DateTime.UtcNow - started).TotalSeconds:0}s to read");
                 }
                 catch (Exception ex)
                 {
