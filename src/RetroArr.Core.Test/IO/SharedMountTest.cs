@@ -8,12 +8,12 @@ namespace RetroArr.Core.Test.IO
     {
         private const string MountInfo =
             "20 1 0:30 / / rw - overlay overlay rw\n" +
-            "41 20 253:1 /games/roms /media rw,noatime - btrfs /dev/mapper/sda1 rw\n" +
-            "42 20 253:1 /Download/qbittorrent/games /downloads/qbittorrent ro,noatime - btrfs /dev/mapper/sda1 rw\n" +
-            "43 20 253:1 /games/bin /trash rw,noatime - btrfs /dev/mapper/sda1 rw\n" +
-            "44 20 253:1 / /nas rw,noatime - btrfs /dev/mapper/sda1 rw\n" +
-            "45 20 253:7 /docker/retroarr/config /app/config rw - btrfs /dev/mapper/sda1 rw\n" +
-            "46 20 253:1 /games/My\\040Games /spaced rw - btrfs /dev/mapper/sda1 rw\n";
+            "41 20 253:1 /games/roms /media rw,noatime - btrfs /dev/sda1 rw\n" +
+            "42 20 253:1 /downloads/torrents /downloads/qbittorrent ro,noatime - btrfs /dev/sda1 rw\n" +
+            "43 20 253:1 /games/bin /trash rw,noatime - btrfs /dev/sda1 rw\n" +
+            "44 20 253:1 / /nas rw,noatime - btrfs /dev/sda1 rw\n" +
+            "45 20 253:7 /docker/retroarr/config /app/config rw - btrfs /dev/sdb1 rw\n" +
+            "46 20 253:1 /games/My\\040Games /spaced rw - btrfs /dev/sda1 rw\n";
 
         [SetUp]
         public void SetUp()
@@ -32,7 +32,7 @@ namespace RetroArr.Core.Test.IO
         }
 
         [TestCase("/media/switch/Zelda.nsp", "/nas/games/roms/switch/Zelda.nsp")]
-        [TestCase("/downloads/qbittorrent/Zelda [NSP]/Zelda.nsp", "/nas/Download/qbittorrent/games/Zelda [NSP]/Zelda.nsp")]
+        [TestCase("/downloads/qbittorrent/Zelda [NSP]/Zelda.nsp", "/nas/downloads/torrents/Zelda [NSP]/Zelda.nsp")]
         [TestCase("/trash/20261025-120000_abcd1234/x.nsp", "/nas/games/bin/20261025-120000_abcd1234/x.nsp")]
         [TestCase("/media", "/nas/games/roms")]
         [TestCase("/spaced/a.iso", "/nas/games/My Games/a.iso")]

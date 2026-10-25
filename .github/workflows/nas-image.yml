@@ -14,7 +14,6 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - 'nas/**'
       - '**.md'
 
 permissions:
@@ -85,7 +84,7 @@ jobs:
       - id: meta
         run: echo "short=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
 
-      # The NAS (NAS) is x86-64
+      # The NAS is x86-64
       - uses: docker/build-push-action@v6
         with:
           context: .

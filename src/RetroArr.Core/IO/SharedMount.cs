@@ -40,7 +40,7 @@ namespace RetroArr.Core.IO
             return Join(shared.MountPoint, Relative(onDisk, shared.Root));
         }
 
-        // "36 35 98:0 /games/roms /media rw,noatime - btrfs /dev/mapper/sda1 rw"
+        // "36 35 98:0 /games/roms /media rw,noatime - btrfs /dev/sda1 rw"
         internal static List<Mount> Parse(string mountInfo) =>
             mountInfo.Split('\n', StringSplitOptions.RemoveEmptyEntries)
                 .Select(l => l.Split(' '))
