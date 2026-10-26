@@ -40,6 +40,8 @@ namespace RetroArr.Core.Test.Games
             _service = new SwitchMergeService(config, new TrashService(config))
             {
                 Nscb = nscb,
+                NscbRust = Path.Combine(_root, "nscb_rust"),
+                NscbRustUrl = null,
                 KeysFile = keys,
                 WorkRoot = Path.Combine(_root, "temp"),
                 FreeSpace = _ => long.MaxValue,
@@ -49,6 +51,13 @@ namespace RetroArr.Core.Test.Games
             _service.Run = (args, cwd, timeout, ct) =>
             {
                 _calls.Add(args);
+                if (args.Contains("-d") && !args.Contains("-dmul"))
+                {
+                    var output = args[Array.IndexOf(args, "-o") + 1];
+                    var inputs = args.Skip(2).TakeWhile(x => x != "-t").ToList();
+                    File.WriteAllBytes(Path.Combine(output, _mergedName), inputs.SelectMany(File.ReadAllBytes).ToArray());
+                    return Task.FromResult((0, "done"));
+                }
                 if (args.Contains("-dmul"))
                 {
                     var output = args[Array.IndexOf(args, "-o") + 1];
@@ -207,6 +216,22 @@ namespace RetroArr.Core.Test.Games
                 (0x0100A6301214E000UL, 0), (0x0100A6301214E800UL, 131072), (0x0100A6301214F001UL, 0)
             }));
             Assert.That(SwitchMergeService.Plan(parts).Single().Inputs.Count(), Is.EqualTo(3));
+        }
+
+        [Test]
+        public async Task WithNscbRust_ItMergesAndVerifies_InsteadOfThePythonTool()
+        {
+            File.WriteAllText(_service.NscbRust, "");
+            Part("Zelda/Zelda [0100F2C0115B6000][v0].nsp", 100);
+            Part("Zelda/Zelda [0100F2C0115B6800][v393216].nsp", 30);
+
+            Assert.That(await _service.RunOnceAsync(), Is.EqualTo(1));
+
+            Assert.That(_calls.Select(c => c[0]), Is.All.EqualTo(_service.NscbRust));
+            Assert.That(_calls[0], Does.Contain("-d").And.Contain("--keys").And.Contain("--temp-dir"));
+            Assert.That(_calls[1], Does.Contain("-v").And.Contain("lv3").And.Contain("--text_file"));
+            Assert.That(File.Exists(Path.Combine(Path.GetDirectoryName(_service.Nscb)!, "keys.txt")), Is.False, "the keys are passed, never copied");
+            Assert.That(Directory.EnumerateFiles(_switch, "*.nsp", SearchOption.AllDirectories).Single(), Does.EndWith("[0100F2C0115B6000][v393216].nsp"));
         }
     }
 }

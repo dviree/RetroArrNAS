@@ -47,6 +47,13 @@ namespace RetroArr.Core.Games
         private readonly IGameRepository? _games;
 
         internal string Nscb = Environment.GetEnvironmentVariable("SWITCH_NSCB") ?? "/opt/nscb/squirrel.py";
+        // nscb_rust (github.com/cxfcxf/nscb_rust), the merger GameSauce used: preferred when it is there. It carries no
+        // licence, so the image does not ship it; the NAS fetches the author's own release once, checked by its hash.
+        internal string NscbRust = Environment.GetEnvironmentVariable("SWITCH_NSCB_RUST") ?? "/app/config/switch/nscb_rust";
+        internal string? NscbRustUrl = Environment.GetEnvironmentVariable("SWITCH_NSCB_RUST_URL") ?? RustRelease;
+        internal const string RustRelease = "https://github.com/cxfcxf/nscb_rust/releases/download/v0.1.18/nscb_rust-linux-amd64";
+        private const string RustReleaseSha256 = "de5e5078581fa2f86126e5280fb617b246bc349df4ca381ab00eb2c4265cf47b";
+        private bool _rustFetchTried;
         internal string KeysFile = Environment.GetEnvironmentVariable("SWITCH_KEYS_FILE") ?? "/app/config/switch/prod.keys";
         internal string WorkRoot = Environment.GetEnvironmentVariable("SWITCH_WORK") ?? "/temp/retroarr-switch";
         internal TimeSpan Interval = TimeSpan.FromMinutes(
@@ -67,7 +74,40 @@ namespace RetroArr.Core.Games
 
         internal string? LastError { get; private set; }
 
-        public bool IsEnabled => File.Exists(Nscb) && File.Exists(KeysFile);
+        public bool IsEnabled => File.Exists(KeysFile) && (File.Exists(Nscb) || File.Exists(NscbRust) || !string.IsNullOrEmpty(NscbRustUrl));
+
+        private bool UsesRust => File.Exists(NscbRust);
+
+        // Fetches nscb_rust once per start when it is not there yet; the Python NSC_Builder stays the fallback
+        internal async Task EnsureRustAsync(CancellationToken ct)
+        {
+            if (UsesRust || string.IsNullOrEmpty(NscbRustUrl) || _rustFetchTried) return;
+            _rustFetchTried = true;
+            var partial = NscbRust + ".download";
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(NscbRust)!);
+                using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+                var bytes = await http.GetByteArrayAsync(NscbRustUrl, ct);
+                var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant();
+                if (NscbRustUrl == RustRelease && hash != RustReleaseSha256)
+                {
+                    _logger.Warn($"[SwitchMerge] nscb_rust download does not match its known hash ({hash}); not used");
+                    return;
+                }
+                await File.WriteAllBytesAsync(partial, bytes, ct);
+                if (!OperatingSystem.IsWindows())
+                    File.SetUnixFileMode(partial, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+                        | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+                File.Move(partial, NscbRust, overwrite: true);
+                _logger.Info($"[SwitchMerge] nscb_rust fetched to {NscbRust}");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.Warn($"[SwitchMerge] Could not fetch nscb_rust ({ex.Message}); the Python NSC_Builder is used");
+                try { File.Delete(partial); } catch (Exception) { }
+            }
+        }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
@@ -103,6 +143,8 @@ namespace RetroArr.Core.Games
         {
             var library = LibraryFolder;
             if (library == null || !Directory.Exists(library)) return 0;
+            await EnsureRustAsync(ct);
+            if (!UsesRust && !File.Exists(Nscb)) return 0;
             var state = LoadState();
             var merged = 0;
             foreach (var family in Plan(Scan(library)))
@@ -207,13 +249,25 @@ namespace RetroArr.Core.Games
             Directory.CreateDirectory(output);
             try
             {
-                // NSC_Builder changes to its own folder and reads keys.txt there; the keys never reach the library or the logs
-                File.Copy(KeysFile, Path.Combine(Path.GetDirectoryName(Nscb)!, "keys.txt"), overwrite: true);
+                var rust = UsesRust;
                 var list = Path.Combine(work, "list.txt");
                 await File.WriteAllLinesAsync(list, inputs.Select(p => p.Path), ct);
-                _logger.Info($"[SwitchMerge] Merging {inputs.Count} parts of {family.BaseId:X16}: {string.Join(", ", inputs.Select(p => Path.GetFileName(p.Path)))}");
+                _logger.Info($"[SwitchMerge] Merging {inputs.Count} parts of {family.BaseId:X16} with {(rust ? "nscb_rust" : "NSC_Builder")}: {string.Join(", ", inputs.Select(p => Path.GetFileName(p.Path)))}");
 
-                var (code, log) = await Run(new[] { Nscb, "-b", "65536", "-t", "nsp", "-o", output, "-tfile", list, "-dmul", "calculate" }, work, TimeSpan.FromHours(6), ct);
+                string[] mergeArgs;
+                if (rust)
+                {
+                    var temp = Directory.CreateDirectory(Path.Combine(work, "tmp")).FullName;
+                    mergeArgs = new[] { NscbRust, "-d" }.Concat(inputs.Select(p => p.Path))
+                        .Concat(new[] { "-t", "nsp", "-o", output, "--keys", KeysFile, "--temp-dir", temp }).ToArray();
+                }
+                else
+                {
+                    // NSC_Builder changes to its own folder and reads keys.txt there; the keys never reach the library or the logs
+                    File.Copy(KeysFile, Path.Combine(Path.GetDirectoryName(Nscb)!, "keys.txt"), overwrite: true);
+                    mergeArgs = new[] { Nscb, "-b", "65536", "-t", "nsp", "-o", output, "-tfile", list, "-dmul", "calculate" };
+                }
+                var (code, log) = await Run(mergeArgs, work, TimeSpan.FromHours(6), ct);
                 _lastOutput = log;
                 var made = Directory.EnumerateFiles(output, "*.nsp").ToList();
                 if (code != 0 || made.Count != 1) return $"NSC_Builder made {made.Count} files (exit {code}): {Tail(log)}";
@@ -224,7 +278,10 @@ namespace RetroArr.Core.Games
 
                 var verifyList = Path.Combine(work, "verify.txt");
                 await File.WriteAllLinesAsync(verifyList, new[] { mergedFile }, ct);
-                var (verifyCode, verifyLog) = await Run(new[] { Nscb, "-b", "65536", "-vt", "lv3", "-tfile", verifyList, "-o", Path.Combine(work, "info"), "-v", "" }, work, TimeSpan.FromHours(3), ct);
+                var verifyArgs = rust
+                    ? new[] { NscbRust, "-v", mergedFile, "--vertype", "lv3", "--text_file", verifyList, "--keys", KeysFile }
+                    : new[] { Nscb, "-b", "65536", "-vt", "lv3", "-tfile", verifyList, "-o", Path.Combine(work, "info"), "-v", "" };
+                var (verifyCode, verifyLog) = await Run(verifyArgs, work, TimeSpan.FromHours(3), ct);
                 _lastOutput = log + "\n--- verify ---\n" + verifyLog;
                 var verdict = Verdict(verifyLog);
                 if (verifyCode != 0 || verdict != null) return $"verification failed: {verdict ?? $"exit {verifyCode}"}";
@@ -353,8 +410,10 @@ namespace RetroArr.Core.Games
 
         private static async Task<(int Code, string Output)> RunProcessAsync(string[] args, string workingDirectory, TimeSpan timeout, CancellationToken ct)
         {
-            var info = new ProcessStartInfo("python3") { WorkingDirectory = workingDirectory, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true };
-            foreach (var a in args) info.ArgumentList.Add(a);
+            // squirrel.py runs under python3; nscb_rust is a program of its own
+            var python = args[0].EndsWith(".py", StringComparison.OrdinalIgnoreCase);
+            var info = new ProcessStartInfo(python ? "python3" : args[0]) { WorkingDirectory = workingDirectory, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true };
+            foreach (var a in python ? args : args.Skip(1)) info.ArgumentList.Add(a);
             using var process = Process.Start(info)!;
             process.StandardInput.Close(); // NSC_Builder asks questions on some paths; an empty answer ends them
             var stdout = process.StandardOutput.ReadToEndAsync(ct);
