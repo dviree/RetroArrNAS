@@ -115,6 +115,7 @@ namespace RetroArr.Core.Games
                 {
                     _logger.Warn($"[SwitchMerge] {Path.GetFileName(family.Base.Path)}: {error}");
                     Note($"failed {family.Base.Path}: {error}");
+                    KeepOutput(family.Base.Path);
                     LastError = error;
                     state[family.Fingerprint] = DateTime.UtcNow;
                 }
@@ -213,6 +214,7 @@ namespace RetroArr.Core.Games
                 _logger.Info($"[SwitchMerge] Merging {inputs.Count} parts of {family.BaseId:X16}: {string.Join(", ", inputs.Select(p => Path.GetFileName(p.Path)))}");
 
                 var (code, log) = await Run(new[] { Nscb, "-b", "65536", "-t", "nsp", "-o", output, "-tfile", list, "-dmul", "calculate" }, work, TimeSpan.FromHours(6), ct);
+                _lastOutput = log;
                 var made = Directory.EnumerateFiles(output, "*.nsp").ToList();
                 if (code != 0 || made.Count != 1) return $"NSC_Builder made {made.Count} files (exit {code}): {Tail(log)}";
                 var mergedFile = made[0];
@@ -223,6 +225,7 @@ namespace RetroArr.Core.Games
                 var verifyList = Path.Combine(work, "verify.txt");
                 await File.WriteAllLinesAsync(verifyList, new[] { mergedFile }, ct);
                 var (verifyCode, verifyLog) = await Run(new[] { Nscb, "-b", "65536", "-vt", "lv3", "-tfile", verifyList, "-o", Path.Combine(work, "info"), "-v", "" }, work, TimeSpan.FromHours(3), ct);
+                _lastOutput = log + "\n--- verify ---\n" + verifyLog;
                 var verdict = Verdict(verifyLog);
                 if (verifyCode != 0 || verdict != null) return $"verification failed: {verdict ?? $"exit {verifyCode}"}";
 
@@ -318,6 +321,21 @@ namespace RetroArr.Core.Games
         {
             try { return File.Exists(StatePath) ? JsonSerializer.Deserialize<Dictionary<string, DateTime>>(File.ReadAllText(StatePath)) ?? new() : new(); }
             catch (Exception) { return new(); }
+        }
+
+        private string? _lastOutput;
+
+        // switch-merge-output.log in the config folder: NSC_Builder's whole output of the last failed merge, without its
+        // progress bars, so an error printed early is not lost
+        private void KeepOutput(string basePath)
+        {
+            if (_lastOutput == null) return;
+            var lines = _lastOutput.Replace("\r\n", "\n").Split('\n')
+                .Select(l => l.Split('\r').LastOrDefault(p => p.Trim().Length > 0) ?? string.Empty)
+                .Where(l => l.Trim().Length > 0 && !Regex.IsMatch(l, @"\d+%\|"));
+            try { File.WriteAllText(Path.Combine(_config.GetConfigDirectory(), "switch-merge-output.log"), $"{DateTime.UtcNow:o} {basePath}{Environment.NewLine}{string.Join(Environment.NewLine, lines)}{Environment.NewLine}"); }
+            catch (Exception) { }
+            _lastOutput = null;
         }
 
         // switch-merge.log in the config folder: every merge and why one failed, kept past container restarts
