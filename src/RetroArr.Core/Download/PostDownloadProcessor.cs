@@ -1525,10 +1525,15 @@ namespace RetroArr.Core.Download
             var libraryRoot = !string.IsNullOrEmpty(media.DestinationPath) && Path.IsPathRooted(media.DestinationPath) ? media.DestinationPath
                 : !string.IsNullOrEmpty(media.FolderPath) && Path.IsPathRooted(media.FolderPath) ? media.FolderPath : null;
             if (libraryRoot == null) return PostDownloadResult.Fail("Library path not configured.");
-            var platformFolder = ResolvePlatformFolderName(download.PlatformFolder, media.FolderNamingMode) ?? download.PlatformFolder!;
+            // The title ID decides the console, whatever a name lookup or an earlier grab said: PPSA is PS5, CUSA is PS4
+            var platformHint = PlayStationImporter.PlatformForTitleId(Games.PlayStationPackageInspector.Inspect(download.DownloadPath!).TitleId
+                ?? Games.PlayStationPackageInspector.TitleIdIn(download.Name)) ?? download.PlatformFolder;
+            if (!string.Equals(platformHint, download.PlatformFolder, StringComparison.OrdinalIgnoreCase))
+                _logger.Info($"[PostDownload] {download.Name}: title ID says {platformHint}, not {download.PlatformFolder}");
+            var platformFolder = ResolvePlatformFolderName(platformHint, media.FolderNamingMode) ?? platformHint!;
             var outcome = await new PlayStationImporter(_fileMover, _ai, _trash, _archiveService).ImportAsync(download.DownloadPath!, download.Name, libraryRoot, platformFolder);
             if (!outcome.Success) return PostDownloadResult.Fail(outcome.Reason ?? "PlayStation import failed");
-            try { await AddMovedGameToLibraryAsync(outcome.Title ?? download.Name, outcome.Destination!, false, _metadataFactory.CreateService(), download.PlatformFolder, false); }
+            try { await AddMovedGameToLibraryAsync(outcome.Title ?? download.Name, outcome.Destination!, false, _metadataFactory.CreateService(), platformHint, false); }
             catch (Exception ex) { _logger.Warn($"[PostDownload] {outcome.Destination} is in the library folder but not yet in the list, the next scan adds it: {ex.Message}"); }
             // A release of a game the library already has (an LZ4 folder in roms/ps5 means LZ4 works) goes too
             if (moveAfterImport && (outcome.Unpacked || outcome.AlreadyInLibrary || (outcome.VerifyFrom != null && SourceVerified(outcome.VerifyFrom, outcome.Destination, null))))

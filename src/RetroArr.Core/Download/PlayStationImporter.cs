@@ -65,6 +65,13 @@ namespace RetroArr.Core.Download
         /// <summary>The subfolder of roms/ps5 that fake PKGs go to, PS_PKG_FOLDER, default "pkg". PS4 has none.</summary>
         public static string PkgFolder => Environment.GetEnvironmentVariable("PS_PKG_FOLDER") is { Length: > 0 } f ? f : "pkg";
 
+        /// <summary>"ps5" for PPSA/ECAS, "ps4" for CUSA, null when there is no title ID.</summary>
+        public static string? PlatformForTitleId(string? titleId) =>
+            string.IsNullOrEmpty(titleId) ? null
+            : titleId.StartsWith("CUSA", StringComparison.OrdinalIgnoreCase) ? "ps4"
+            : titleId.StartsWith("PPSA", StringComparison.OrdinalIgnoreCase) || titleId.StartsWith("ECAS", StringComparison.OrdinalIgnoreCase) ? "ps5"
+            : null;
+
         public static bool IsPs5(string? platformFolder) =>
             PlatformDefinitions.AllPlatforms.FirstOrDefault(p => p.MatchesFolderName(platformFolder ?? string.Empty))?.MatchesFolderName("ps5") == true
             || string.Equals(platformFolder, "ps5", StringComparison.OrdinalIgnoreCase);

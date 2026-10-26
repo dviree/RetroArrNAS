@@ -344,6 +344,15 @@ namespace RetroArr.Core.Test.Download
             Assert.That(Directory.GetFiles(Ps5), Has.Length.EqualTo(1));
         }
 
+        [TestCase("PPSA02100", "ps5")]
+        [TestCase("ECAS00001", "ps5")]
+        [TestCase("CUSA00900", "ps4")]
+        [TestCase(null, null)]
+        public void TheTitleId_DecidesTheConsole(string? id, string? platform)
+        {
+            Assert.That(PlayStationImporter.PlatformForTitleId(id), Is.EqualTo(platform));
+        }
+
         [TestCase("Ghost.of.Yotei.PS5-DUPLEX", "Ghost of Yotei")]
         [TestCase("250101 - Astro Bot [PPSA01234] [v1.05] [DUPLEX]", "Astro Bot")]
         [TestCase("Marvels_Spider-Man_2_PPSA03016_v1.002", "Marvels Spider-Man 2")]
