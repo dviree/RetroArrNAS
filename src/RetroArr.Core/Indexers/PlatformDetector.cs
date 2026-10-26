@@ -79,6 +79,8 @@ namespace RetroArr.Core.Indexers
             
             // PC
             (new Regex(@"\b(GOG|CODEX|PLAZA|SKIDROW|RELOADED|FLT|HOODLUM|TENOKE|RUNE)\b", RegexOptions.IgnoreCase), "PC", "windows"),
+            // PC repack and rip sites, often the whole folder name ("Castlevania-BC-SteamRIP.com")
+            (new Regex(@"(SteamRIP|FitGirl|DODI|ElAmigos|EMPRESS|Razor1911|KaOs|GOG-?Games|SteamUnlocked|Online-?Fix)", RegexOptions.IgnoreCase), "PC", "windows"),
             (new Regex(@"\b(Windows|Win32|Win64|x86|x64|PC)\b", RegexOptions.IgnoreCase), "PC", "windows"),
             (new Regex(@"\b(macOS|OSX|Mac)\b", RegexOptions.IgnoreCase), "Mac", "macintosh"),
             (new Regex(@"\bLinux\b", RegexOptions.IgnoreCase), "Linux", "linux"),

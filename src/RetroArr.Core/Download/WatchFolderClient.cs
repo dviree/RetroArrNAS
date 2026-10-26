@@ -378,9 +378,12 @@ namespace RetroArr.Core.Download
         /// <summary>The platform folder for a name and the files under it, or null when nothing names one.</summary>
         internal static string? DetectPlatform(string name, IEnumerable<FileInfo> files)
         {
-            var tags = files.Select(f => ExtensionTags.TryGetValue(f.Extension, out var tag) ? tag : null)
+            var fileList = files as ICollection<FileInfo> ?? files.ToList();
+            var tags = fileList.Select(f => ExtensionTags.TryGetValue(f.Extension, out var tag) ? tag : null)
                 .Where(t => t != null).Distinct().ToList();
             tags.AddRange(TitleIdTags.Where(t => t.Pattern.IsMatch(name)).Select(t => t.Tag));
+            // A Windows program and no console files: a PC game (setup.exe, Game.exe, a SteamRIP folder)
+            if (tags.Count == 0 && fileList.Any(f => f.Extension.Equals(".exe", StringComparison.OrdinalIgnoreCase))) tags.Add("PC");
             var probe = new SearchResult { Title = $"{name} {string.Join(' ', tags)}" };
             PlatformDetector.DetectPlatform(probe);
             return string.IsNullOrEmpty(probe.PlatformFolder) || probe.PlatformFolder == "unknown" ? null : probe.PlatformFolder;

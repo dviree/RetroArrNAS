@@ -71,6 +71,14 @@ namespace RetroArr.Core.Test.Download
             Assert.That((await List()).Single().PlatformFolder, Is.EqualTo("switch"));
         }
 
+        [TestCase("Castlevania-BC-SteamRIP.com/Castlevania Belmonts Curse/Castlevania.exe")]
+        [TestCase("Some Game/setup.exe")]
+        public async Task WindowsPrograms_ArePcGames(string relative)
+        {
+            Write(relative);
+            Assert.That((await new WatchFolderClient(_root, null, recursive: true).GetDownloadsAsync()).Single().PlatformFolder, Is.EqualTo("windows"));
+        }
+
         [Test]
         public async Task NothingNamingAPlatform_LeavesItUnmapped()
         {
