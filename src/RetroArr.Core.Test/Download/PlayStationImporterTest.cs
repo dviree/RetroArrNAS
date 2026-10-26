@@ -281,6 +281,32 @@ namespace RetroArr.Core.Test.Download
         }
 
         [Test]
+        public async Task APkg_IsAdded_EvenWhenTheGameIsThereAsLz4FolderOrImage()
+        {
+            Directory.CreateDirectory(Path.Combine(Ps5, "Onimusha Way of the Sword _PPSA27836_ _v1.0.1_-lz4"));
+            File.WriteAllText(Path.Combine(Ps5, "Onimusha [PPSA27836] [v1.0].exfat"), "image");
+            var pkg = Path.Combine(_inbox, "EP0102-PPSA27836_00-ONIMUSHAWOTS0000.pkg");
+            File.WriteAllText(pkg, "fpkg");
+
+            var result = await _importer.ImportAsync(pkg, Path.GetFileName(pkg), _library, "ps5");
+
+            Assert.That(result.Success, Is.True, result.Reason);
+            Assert.That(result.AlreadyInLibrary, Is.False, "the PKG is not counted as there, so its release is not just thrown away");
+            Assert.That(Directory.GetFiles(Path.Combine(Ps5, "pkg")).Single(), Does.Contain("[PPSA27836]"));
+            Assert.That(Directory.GetDirectories(Ps5), Has.Length.EqualTo(2), "the LZ4 folder stays");
+        }
+
+        [Test]
+        public async Task APkgInThePkgFolder_DoesNotStopAnLz4OrImage()
+        {
+            Directory.CreateDirectory(Path.Combine(Ps5, "pkg"));
+            File.WriteAllText(Path.Combine(Ps5, "pkg", "FINAL FANTASY VII REMAKE [PPSA01903].pkg"), "pkg");
+            var result = await Import(Image("ff7r.exfat"));
+            Assert.That(result.AlreadyInLibrary, Is.False);
+            Assert.That(Directory.GetFiles(Ps5).Single(), Does.EndWith("[v1.10].exfat"));
+        }
+
+        [Test]
         public async Task AnOlderLz4Folder_IsKept_WhenANewerGameArrives()
         {
             Directory.CreateDirectory(Ps5);
