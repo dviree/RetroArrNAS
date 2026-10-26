@@ -66,7 +66,7 @@ namespace RetroArr.Core.Test.Games
         }
 
         [Test]
-        public async Task TitleIdFolders_GetTheGamesOwnTitle_ButLz4FoldersAreNeverTouched()
+        public async Task TitleIdFolders_GetTheGamesOwnTitle_Lz4FoldersInPlace()
         {
             Game(_lz4, "PPSA26344-app0-lz4");
             Game(_ps5, "PPSA26344-app0");
@@ -74,10 +74,11 @@ namespace RetroArr.Core.Test.Games
 
             var done = await _namer.RunOnceAsync();
 
-            Assert.That(done, Has.Count.EqualTo(1));
-            Assert.That(Directory.Exists(Path.Combine(_lz4, "PPSA26344-app0-lz4")), Is.True, "the LZ4 library is the owner's");
-            Assert.That(Directory.Exists(Path.Combine(_ps5, "PPSA26344-app0-lz4")), Is.True, "LZ4 folders keep their name");
+            Assert.That(done, Has.Count.EqualTo(3));
+            Assert.That(Directory.Exists(Path.Combine(_lz4, "Ghost of Yōtei [PPSA26344] [v1.0.2]-lz4")), Is.True, "renamed where it is, never moved");
+            Assert.That(Directory.Exists(Path.Combine(_ps5, "Ghost of Yōtei [PPSA26344] [v1.0.2]-lz4")), Is.True);
             Assert.That(Directory.Exists(Path.Combine(_ps5, "Ghost of Yōtei [PPSA26344] [v1.0.2]")), Is.True);
+            Assert.That(Directory.EnumerateDirectories(_lz4).Count(), Is.EqualTo(1), "nothing left or added in the LZ4 library");
             Assert.That(Directory.EnumerateFiles(_root, "ps-renames.json", SearchOption.AllDirectories).Count(), Is.EqualTo(1), "every rename can be undone");
         }
 

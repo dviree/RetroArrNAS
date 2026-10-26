@@ -17,8 +17,8 @@ namespace RetroArr.Core.Games
 
     /// <summary>
     /// Gives PS4/PS5 games in roms/ps5 and roms/ps4 that are only a title ID ("PPSA26344-app0", "CUSA00900.pkg") a
-    /// real name: "Ghost of Yotei [PPSA26344] [v1.0]". LZ4 folders and the other libraries (PS_LIBRARY_EXTRA) are never
-    /// touched; the owner manages those.
+    /// real name: "Ghost of Yotei [PPSA26344] [v1.0]". LZ4 folders and the other libraries (PS_LIBRARY_EXTRA, the LZ4
+    /// library) are renamed in place too, keeping their -lz4 ending; nothing is ever moved out of them.
     /// The title comes from the game's own param.json/param.sfo, else from the AI. Names that already carry a title are
     /// left alone, as is anything written to in the last six hours (a converter may be at work). Every rename is logged
     /// to ps-renames.json in the config folder, so it can be undone.
@@ -74,7 +74,9 @@ namespace RetroArr.Core.Games
                     // Only PS5 has a pkg folder
                     if (p == "ps5") yield return Path.Combine(folder, PlayStationImporter.PkgFolder);
                 }
-            }
+            // The LZ4 library: names only, in place
+            foreach (var extra in PlayStationImporter.OtherLibraries) yield return extra;
+        }
 
         /// <summary>Renames what needs a name. Returns the renames made, old path to new path.</summary>
         public async Task<List<(string From, string To)>> RunOnceAsync(CancellationToken ct = default)
@@ -91,8 +93,8 @@ namespace RetroArr.Core.Games
                     ct.ThrowIfCancellationRequested();
                     var name = Path.GetFileName(entry);
                     if (name.StartsWith('.')) continue;
-                    // LZ4 folders are the owner's to manage and keep the name they have
-                    if (!NeedsName(name) || PlayStationImporter.KindOf(entry) == PlayStationFormat.Lz4Folder || RecentlyWritten(entry)) continue;
+                    // A converter may still be at work on what changed lately
+                    if (!NeedsName(name) || RecentlyWritten(entry)) continue;
                     var target = await NewNameAsync(entry);
                     if (target == null || target == name) continue;
                     var to = Path.Combine(folder, target);
