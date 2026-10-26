@@ -101,5 +101,14 @@ namespace RetroArr.Core.Test.Games
             var game = await _repo.GetByIdAsync(id);
             Assert.That((game!.Title, game.IgdbId), Is.EqualTo(("Saros", (int?)null)));
         }
+
+        [TestCase("SAROS.PS5-DUPLEX", true)]
+        [TestCase("Stray_PPSA02561", true)]
+        [TestCase("Ghost.of.Yotei.PS5-BlaZe", true)]
+        [TestCase("Super Mario World (USA).sfc", false)]
+        [TestCase("Castlevania - Symphony of the Night (USA) [!].bin", false)]
+        [TestCase("Hollow Knight", false)]
+        public void ScannerAsksTheAi_OnlyForReleaseNames(string name, bool expected) =>
+            Assert.That(AiMetadataFixer.LooksLikeRelease(name), Is.EqualTo(expected));
     }
 }

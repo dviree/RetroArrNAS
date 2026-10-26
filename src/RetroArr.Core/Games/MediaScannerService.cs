@@ -684,6 +684,7 @@ namespace RetroArr.Core.Games
         private readonly ReviewItemService? _reviewService;
 
         private readonly DuplicateGameMergeService? _mergeService;
+        private readonly MetadataSource.AiTitleService? _ai;
 
         // discovery-only mode: walk the same paths but persist candidates instead of
         // running the full metadata pipeline. Set with the scan slot, cleared when it is freed.
@@ -698,8 +699,10 @@ namespace RetroArr.Core.Games
             DebugLogService? debugLog = null,
             ReviewItemService? reviewService = null,
             DuplicateGameMergeService? mergeService = null,
-            DiscoveredGameRepository? discoveryRepo = null)
+            DiscoveredGameRepository? discoveryRepo = null,
+            MetadataSource.AiTitleService? ai = null)
         {
+            _ai = ai;
             _configService = configService;
             _metadataServiceFactory = metadataServiceFactory;
             _gameRepository = gameRepository;
@@ -2130,6 +2133,9 @@ namespace RetroArr.Core.Games
                 return false;
             }
 
+            // A release name ("SAROS.PS5-DUPLEX") is named by the AI before IGDB is asked
+            gameTitle = await AiTitleAsync(gameTitle, localPath ?? executablePath);
+
             // Resolve numeric platform ID for this candidate so we can match by title+platform
             int candidatePlatformId = 0;
             if (!string.IsNullOrEmpty(platformKey))
@@ -2239,6 +2245,25 @@ namespace RetroArr.Core.Games
             {
                 Log($"[Scanner] Update failed for '{existing.Title}': {ex.Message}");
                 return false;
+            }
+        }
+
+        private async Task<string> AiTitleAsync(string gameTitle, string? path)
+        {
+            var raw = string.IsNullOrEmpty(path) ? null : Path.GetFileName(Path.TrimEndingDirectorySeparator(path));
+            if (_ai is not { IsEnabled: true } || raw == null || !AiMetadataFixer.LooksLikeRelease(raw)) return gameTitle;
+            try
+            {
+                var files = Directory.Exists(path) ? Directory.EnumerateFileSystemEntries(path!).Take(30).Select(Path.GetFileName).OfType<string>() : new[] { raw };
+                var guess = await _ai.IdentifyAsync(raw, files);
+                if (guess == null || string.IsNullOrWhiteSpace(guess.Title)) return gameTitle;
+                Log($"[Scanner] AI named '{raw}' -> '{guess.Title}'");
+                return guess.Title;
+            }
+            catch (Exception ex)
+            {
+                Log($"[Scanner] AI naming failed for '{raw}': {ex.Message}", LogLevel.Warning);
+                return gameTitle;
             }
         }
 

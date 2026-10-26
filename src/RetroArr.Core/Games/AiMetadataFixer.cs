@@ -58,6 +58,13 @@ namespace RetroArr.Core.Games
             @"(\.\w+\.|-(DUPLEX|BlaZe|CUSA|PPSA|VENOM|LiGHTFORCE|SUXXORS|DarKmooN|NSW2U|BigBlueBox)\b|\b(PPSA|CUSA|ECAS)[-_]?\d{5}|\b(PS[345]|NSP|XCI|FPKG|app0|lz4|exfat|ffpfsc)\b|\[[^\]]*\]|_)",
             RegexOptions.IgnoreCase);
 
+        // A scene release, not a ROM set name: no spaces, words joined by dots, dashes or underscores, or a PS title ID
+        private static readonly Regex SceneRelease = new(@"^[^\s]+[._-][^\s]+$|\b(PPSA|CUSA|ECAS)[-_]?\d{5}", RegexOptions.IgnoreCase);
+
+        /// <summary>A file or folder name the scanner should let the AI name before IGDB is searched.</summary>
+        internal static bool LooksLikeRelease(string name) =>
+            SceneRelease.IsMatch(name) && ReleaseLike.IsMatch(name);
+
         internal static bool NeedsFixing(Game g) =>
             !g.MetadataConfirmedByUser && (g.IgdbId is null or 0) && !string.IsNullOrWhiteSpace(g.Title) && ReleaseLike.IsMatch(g.Title);
 
