@@ -218,7 +218,7 @@ namespace RetroArr.Core.Games
                 var mergedFile = made[0];
                 var size = new FileInfo(mergedFile).Length;
                 if (size < inputs.Max(p => p.Size) || size > total + total / 20)
-                    return $"merged file has an unlikely size ({size} bytes for {total} in)";
+                    return $"merged file has an unlikely size ({size} bytes for {total} in): {Tail(log)}";
 
                 var verifyList = Path.Combine(work, "verify.txt");
                 await File.WriteAllLinesAsync(verifyList, new[] { mergedFile }, ct);
