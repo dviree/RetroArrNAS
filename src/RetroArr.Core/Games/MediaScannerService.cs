@@ -2867,6 +2867,26 @@ namespace RetroArr.Core.Games
                     }
                 }
 
+                // Other copies of a PS game (its PKG in ps5/pkg, an exFAT image) are listed with it
+                var listed = new HashSet<string>(files.Select(f => f.RelativePath), StringComparer.Ordinal);
+                foreach (var copy in PlayStationCopies(gamePath))
+                {
+                    var stored = GameFilePaths.StoredPath(gamePath, copy);
+                    if (!listed.Add(stored)) continue;
+                    var name = Path.GetFileName(copy);
+                    files.Add(new GameFile
+                    {
+                        GameId = gameId,
+                        RelativePath = stored,
+                        Size = new FileInfo(copy).Length,
+                        DateAdded = DateTime.UtcNow,
+                        FileType = name.Contains("[Update]", StringComparison.OrdinalIgnoreCase) ? "Patch"
+                            : name.Contains("[DLC", StringComparison.OrdinalIgnoreCase) ? "DLC" : "Main",
+                        Version = Download.PlayStationImporter.VersionInName(name),
+                        TitleId = Games.PlayStationPackageInspector.TitleIdIn(name)
+                    });
+                }
+
                 // An emptied folder clears its rows too
                 if (files.Count > 0 || isDir)
                 {
@@ -2883,6 +2903,36 @@ namespace RetroArr.Core.Games
             {
                 Log($"Error syncing game files for ID {gameId}: {ex.Message}", LogLevel.Warning);
             }
+        }
+
+        /// <summary>
+        /// The PKG, exFAT and ffpfsc files of the same PS4/PS5 title that lie beside a game (in its platform folder or
+        /// that folder's pkg folder), found by the title ID in their names. Empty for anything else.
+        /// </summary>
+        internal static List<string> PlayStationCopies(string gamePath)
+        {
+            var copies = new List<string>();
+            try
+            {
+                var entry = Path.TrimEndingDirectorySeparator(gamePath);
+                var id = PlayStationPackageInspector.TitleIdIn(Path.GetFileName(entry));
+                if (id.Length == 0 && Directory.Exists(entry)) id = PlayStationPackageInspector.Inspect(entry).TitleId ?? string.Empty;
+                var platformFolder = Path.GetDirectoryName(entry);
+                if (id.Length == 0 || platformFolder == null) return copies;
+                if (Path.GetFileName(platformFolder).Equals(Download.PlayStationImporter.PkgFolder, StringComparison.OrdinalIgnoreCase))
+                    platformFolder = Path.GetDirectoryName(platformFolder)!;
+                if (!Download.PlayStationImporter.IsPlayStation(Path.GetFileName(platformFolder))) return copies;
+                foreach (var folder in new[] { platformFolder, Path.Combine(platformFolder, Download.PlayStationImporter.PkgFolder) }.Where(Directory.Exists))
+                    copies.AddRange(Directory.EnumerateFiles(folder).Where(f =>
+                    {
+                        var name = Path.GetFileName(f);
+                        return !name.StartsWith('.') && !string.Equals(f, entry, StringComparison.Ordinal)
+                            && Regex.IsMatch(name, @"\.(pkg|exfat|ffpfsc)$", RegexOptions.IgnoreCase)
+                            && PlayStationPackageInspector.TitleIdIn(name).Equals(id, StringComparison.OrdinalIgnoreCase);
+                    }));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            return copies;
         }
 
         private static readonly NLog.Logger _nlog = NLog.LogManager.GetLogger(Logging.AppLoggerService.ScannerMedia);
