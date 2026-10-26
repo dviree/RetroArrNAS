@@ -31,7 +31,7 @@ namespace RetroArr.Core.Games
         private readonly ConfigurationService _config;
         private readonly AiTitleService? _ai;
 
-        internal TimeSpan Interval = TimeSpan.FromHours(6);
+        internal TimeSpan Interval = TimeSpan.FromHours(1);
         internal static TimeSpan QuietFor = TimeSpan.FromHours(6);
         // internal for tests: the rename itself, so a read-only mount can be renamed through the shared one
         internal Action<string, string> Rename = Move;

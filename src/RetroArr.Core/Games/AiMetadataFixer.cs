@@ -15,7 +15,7 @@ namespace RetroArr.Core.Games
     /// Library entries without metadata that still carry a release name ("SAROS.PS5-DUPLEX", "PPSA07631-app0") get
     /// their title from the AI first, then IGDB is searched with it; an IGDB game whose title matches exactly gives the
     /// entry its metadata. Without such a match the entry keeps the AI's clean title. Entries a person confirmed are
-    /// left alone, as is an IGDB id another entry on the same platform holds. Every two hours, a batch at a time.
+    /// left alone, as is an IGDB id another entry on the same platform holds. Every hour, a batch at a time.
     /// </summary>
     [SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes")]
     public class AiMetadataFixer : BackgroundService
@@ -48,7 +48,7 @@ namespace RetroArr.Core.Games
             {
                 try { await RunOnceAsync(stoppingToken); }
                 catch (Exception ex) when (ex is not OperationCanceledException) { _logger.Warn($"[AiMetadata] Run failed: {ex.Message}"); }
-                try { await Task.Delay(TimeSpan.FromHours(2), stoppingToken); }
+                try { await Task.Delay(TimeSpan.FromHours(1), stoppingToken); }
                 catch (TaskCanceledException) { break; }
             }
         }
