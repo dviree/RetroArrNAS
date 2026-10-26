@@ -174,7 +174,8 @@ namespace RetroArr.Core.Games
         /// <summary>The title ID of an NSP from the name of its ticket ("0100ABCD12340000000000000000000A.tik"); null without one.</summary>
         internal static string? NspTitleId(string file)
         {
-            if (!Path.GetExtension(file).Equals(".nsp", StringComparison.OrdinalIgnoreCase)) return null;
+            // An NSZ is a PFS0 too, with the same ticket names
+            if (!Path.GetExtension(file).Equals(".nsp", StringComparison.OrdinalIgnoreCase) && !Path.GetExtension(file).Equals(".nsz", StringComparison.OrdinalIgnoreCase)) return null;
             try
             {
                 using var stream = File.OpenRead(file);
@@ -191,7 +192,8 @@ namespace RetroArr.Core.Games
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
         }
 
-        private static readonly HashSet<string> Mergeable = new(StringComparer.OrdinalIgnoreCase) { ".nsp", ".xci" };
+        private static readonly HashSet<string> Mergeable = new(StringComparer.OrdinalIgnoreCase) { ".nsp", ".xci", ".nsz", ".xcz" };
+        private static readonly HashSet<string> Compressed = new(StringComparer.OrdinalIgnoreCase) { ".nsz", ".xcz" };
 
         /// <summary>The .nsp/.xci files under the library that carry a title ID in their name.</summary>
         internal static List<Part> Scan(string library)
@@ -241,8 +243,10 @@ namespace RetroArr.Core.Games
             var inputs = family.Inputs.ToList();
             var total = inputs.Sum(p => p.Size);
             Directory.CreateDirectory(WorkRoot);
-            if (FreeSpace(WorkRoot) < total * 2 + total / 10)
-                return $"not enough space in {WorkRoot} ({total * 2 / 1_000_000_000.0:0.0} GB needed)";
+            // NSZ/XCZ parts unpack to about twice their size while they are merged
+            var needed = (inputs.Any(p => Compressed.Contains(Path.GetExtension(p.Path))) ? total * 4 : total * 2) + total / 10;
+            if (FreeSpace(WorkRoot) < needed)
+                return $"not enough space in {WorkRoot} ({needed / 1_000_000_000.0:0.0} GB needed)";
 
             var work = Path.Combine(WorkRoot, $"{family.BaseId:X16}-{Guid.NewGuid().ToString("N")[..8]}");
             var output = Path.Combine(work, "out");
@@ -250,6 +254,9 @@ namespace RetroArr.Core.Games
             try
             {
                 var rust = UsesRust;
+                // The Python NSC_Builder writes an NSP only from NSP/NSZ parts; an XCI's content would be left out
+                if (!rust && inputs.Any(p => !p.Path.EndsWith(".nsp", StringComparison.OrdinalIgnoreCase) && !p.Path.EndsWith(".nsz", StringComparison.OrdinalIgnoreCase)))
+                    return "an XCI part needs nscb_rust, which is not there yet";
                 var list = Path.Combine(work, "list.txt");
                 await File.WriteAllLinesAsync(list, inputs.Select(p => p.Path), ct);
                 _logger.Info($"[SwitchMerge] Merging {inputs.Count} parts of {family.BaseId:X16} with {(rust ? "nscb_rust" : "NSC_Builder")}: {string.Join(", ", inputs.Select(p => Path.GetFileName(p.Path)))}");
@@ -273,7 +280,9 @@ namespace RetroArr.Core.Games
                 if (code != 0 || made.Count != 1) return $"NSC_Builder made {made.Count} files (exit {code}): {Tail(log)}";
                 var mergedFile = made[0];
                 var size = new FileInfo(mergedFile).Length;
-                if (size < inputs.Max(p => p.Size) || size > total + total / 20)
+                // Compressed parts (NSZ/XCZ) come out larger than they went in
+                var compressed = inputs.Any(p => Compressed.Contains(Path.GetExtension(p.Path)));
+                if (size < inputs.Max(p => p.Size) || (!compressed && size > total + total / 20))
                     return $"merged file has an unlikely size ({size} bytes for {total} in): {Tail(log)}";
 
                 var verifyList = Path.Combine(work, "verify.txt");

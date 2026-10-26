@@ -233,5 +233,24 @@ namespace RetroArr.Core.Test.Games
             Assert.That(File.Exists(Path.Combine(Path.GetDirectoryName(_service.Nscb)!, "keys.txt")), Is.False, "the keys are passed, never copied");
             Assert.That(Directory.EnumerateFiles(_switch, "*.nsp", SearchOption.AllDirectories).Single(), Does.EndWith("[0100F2C0115B6000][v393216].nsp"));
         }
+
+        [Test]
+        public async Task CompressedParts_AreMergedWithNscbRust()
+        {
+            File.WriteAllText(_service.NscbRust, "");
+            Part("Zelda/Zelda [0100F2C0115B6000][v0].nsz", 100);
+            Part("Zelda/Zelda [0100F2C0115B6800][v393216].nsz", 30);
+            Assert.That(await _service.RunOnceAsync(), Is.EqualTo(1));
+            Assert.That(_calls[0].Count(a => a.EndsWith(".nsz")), Is.EqualTo(2));
+        }
+
+        [Test]
+        public async Task WithoutNscbRust_AnXciPart_IsLeftAlone()
+        {
+            Part("Zelda/Zelda [0100F2C0115B6000][v0].xci", 100);
+            Part("Zelda/Zelda [0100F2C0115B6800][v393216].nsp", 30);
+            Assert.That(await _service.RunOnceAsync(), Is.EqualTo(0));
+            Assert.That(_calls, Is.Empty);
+        }
     }
 }
