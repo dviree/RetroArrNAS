@@ -191,8 +191,7 @@ namespace RetroArr.Core.Download
 
             var entries = _recursive
                 ? Units(new DirectoryInfo(_folder), 0)
-                : new DirectoryInfo(_folder).EnumerateFileSystemInfos().Where(e => !e.Name.StartsWith('.')
-                    && !(e is DirectoryInfo d && File.Exists(Path.Combine(d.FullName, IgnoreMarker))));
+                : TopLevel(new DirectoryInfo(_folder));
             foreach (var entry in entries)
             {
                 try
@@ -210,6 +209,23 @@ namespace RetroArr.Core.Download
             }
             return result;
         }
+
+        // JDownloader unpacks every package into one "extracted" folder: what lies in it are the releases, not the folder
+        private static readonly HashSet<string> ContainerFolders = new(StringComparer.OrdinalIgnoreCase) { "extracted", "_extracted" };
+
+        private static IEnumerable<FileSystemInfo> TopLevel(DirectoryInfo root)
+        {
+            foreach (var entry in Visible(root))
+            {
+                if (entry is DirectoryInfo dir && ContainerFolders.Contains(dir.Name))
+                    foreach (var inner in Visible(dir)) yield return inner;
+                else yield return entry;
+            }
+        }
+
+        private static IEnumerable<FileSystemInfo> Visible(DirectoryInfo dir) =>
+            dir.EnumerateFileSystemInfos().Where(e => !e.Name.StartsWith('.')
+                && !(e is DirectoryInfo d && File.Exists(Path.Combine(d.FullName, IgnoreMarker))));
 
         private DownloadStatus? Describe(FileSystemInfo entry)
         {

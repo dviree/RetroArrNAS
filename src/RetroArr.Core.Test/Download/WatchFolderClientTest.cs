@@ -47,6 +47,18 @@ namespace RetroArr.Core.Test.Download
         private async Task<List<DownloadStatus>> List() => await new WatchFolderClient(_root, "games").GetDownloadsAsync();
 
         [Test]
+        public async Task JDownloadersExtractedFolder_HoldsReleases_EachOneADownload()
+        {
+            Write("extracted/[Nintendo Wii] Super Mario Galaxy 2 [NTSC]/game.wbfs", "wii-game");
+            Write("extracted/Advance Wars/Advance Wars.gba");
+            Write("Other Release/Other Release.gba");
+
+            var names = (await List()).Select(d => d.Name).OrderBy(n => n, StringComparer.Ordinal).ToList();
+
+            Assert.That(names, Is.EqualTo(new[] { "Advance Wars", "Other Release", "[Nintendo Wii] Super Mario Galaxy 2 [NTSC]" }));
+        }
+
+        [Test]
         public async Task GameFolderAndLooseFile_AreFinishedDownloads_WithTheirPlatform()
         {
             Write("[Nintendo Wii] Super Mario Galaxy 2 [NTSC]/[Nintendo Wii] Super Mario Galaxy 2 [NTSC].wbfs", "wii-game");
