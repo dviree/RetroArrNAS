@@ -99,6 +99,10 @@ RUN apk add --no-cache git && mkdir -p /nscb && \
       && rm -rf /nscb/bin /nscb/*.bat /tmp/nscb-src \
       && printf 'from PIL.Image import *  # NSC_Builder imports Pillow under its old name\n' > /nscb/lib/Image.py \
       && printf 'class Translator:  # title translation is never used here\n    def translate(self, *args, **kwargs):\n        raise RuntimeError("translation is not available")\n' > /nscb/lib/googletrans.py \
+      # Python 3.11 made str() of an IntEnum its number, and NSC_Builder compares str(contentType) with "Content.META":
+      # without the old str() it finds no content and writes an empty UNKNOWN.nsp
+      && find /nscb -name '*.py' -exec sed -i 's/^from enum import IntEnum/from nscb_enum import IntEnum/' {} + \
+      && printf 'from enum import IntEnum as _IntEnum\n\n\nclass IntEnum(_IntEnum):\n    def __str__(self):\n        return "%%s.%%s" %% (type(self).__name__, self.name)\n' > /nscb/lib/nscb_enum.py \
     ) || echo "[nscb] WARN: download failed at build time; Switch merging stays off until the image is rebuilt"
 
 FROM node:22 AS frontend
