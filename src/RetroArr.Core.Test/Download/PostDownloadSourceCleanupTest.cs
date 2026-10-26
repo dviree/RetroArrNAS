@@ -192,6 +192,48 @@ namespace RetroArr.Core.Test.Download
             Assert.That(Directory.Exists(source), Is.False, "verified source should be gone");
         }
 
+        [TestCase("extracted/Castlevania-BC-SteamRIP.com/Castlevania Belmonts Curse", "extracted/Castlevania-BC-SteamRIP.com", true)]
+        [TestCase("usenet/Graveyard Keeper 2", "usenet", false)]
+        public async Task ReleaseFolderWithOnlyLeftovers_GoesToo_ButNeverASortingFolder(string game, string release, bool goes)
+        {
+            var root = Directory.CreateDirectory(Path.Combine(_root, "watch")).FullName;
+            var config = new ConfigurationService(_root);
+            config.SaveDownloadClients(new List<DownloadClient>
+            {
+                new DownloadClient { Id = 1, Name = "inbox", Host = root, Implementation = WatchFolderClient.ImplementationName, DeleteSourceAfterImport = true }
+            });
+            var releaseDir = Directory.CreateDirectory(Path.Combine(root, release)).FullName;
+            Directory.CreateDirectory(Path.Combine(releaseDir, "_CommonRedist", "vcredist"));
+            File.WriteAllText(Path.Combine(releaseDir, "_CommonRedist", "vcredist", "vc.exe"), "x");
+            File.WriteAllText(Path.Combine(releaseDir, "Read_Me_Instructions.txt"), "x");
+            File.WriteAllText(Path.Combine(releaseDir, "STEAMRIP Free Steam Games.url"), "x");
+            var processor = new PostDownloadProcessor(config, new FileMoverService(), null!, null!, new ArchiveService(), new TitleCleanerService());
+
+            // the game itself went to the trash already
+            await processor.RetireLeftoversAsync(new DownloadStatus { ClientId = 1, DownloadPath = Path.Combine(root, game) });
+
+            Assert.That(Directory.Exists(releaseDir), Is.EqualTo(!goes));
+            Assert.That(Directory.Exists(root), Is.True);
+        }
+
+        [Test]
+        public async Task ReleaseFolderWithSomethingElse_Stays()
+        {
+            var root = Directory.CreateDirectory(Path.Combine(_root, "watch")).FullName;
+            var config = new ConfigurationService(_root);
+            config.SaveDownloadClients(new List<DownloadClient>
+            {
+                new DownloadClient { Id = 1, Name = "inbox", Host = root, Implementation = WatchFolderClient.ImplementationName, DeleteSourceAfterImport = true }
+            });
+            var releaseDir = Directory.CreateDirectory(Path.Combine(root, "extracted", "Rel")).FullName;
+            File.WriteAllText(Path.Combine(releaseDir, "other-game.iso"), "x");
+            var processor = new PostDownloadProcessor(config, new FileMoverService(), null!, null!, new ArchiveService(), new TitleCleanerService());
+
+            await processor.RetireLeftoversAsync(new DownloadStatus { ClientId = 1, DownloadPath = Path.Combine(releaseDir, "Game") });
+
+            Assert.That(File.Exists(Path.Combine(releaseDir, "other-game.iso")), Is.True);
+        }
+
         [Test]
         public async Task WatchFolder_InMoveMode_PutsTheSourceInTheTrash_WhenThereIsOne()
         {

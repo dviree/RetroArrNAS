@@ -107,7 +107,10 @@ namespace RetroArr.Core.Download
             {
                 var result = await AutoMoveToLibrary(download, keep, extracted);
                 if (result.Success && moveAfterImport && SourceVerified(download.DownloadPath!, result.DestinationPath, keep))
+                {
                     await RetireSourceAsync(download.DownloadPath!, download.Name);
+                    await RetireLeftoversAsync(download);
+                }
                 // Extracted files aren't part of the torrent and the library has its own copy by now
                 if (extracted?.Count > 0)
                 {
@@ -1537,7 +1540,10 @@ namespace RetroArr.Core.Download
             catch (Exception ex) { _logger.Warn($"[PostDownload] {outcome.Destination} is in the library folder but not yet in the list, the next scan adds it: {ex.Message}"); }
             // A release of a game the library already has (an LZ4 folder in roms/ps5 means LZ4 works) goes too
             if (moveAfterImport && (outcome.Unpacked || outcome.AlreadyInLibrary || (outcome.VerifyFrom != null && SourceVerified(outcome.VerifyFrom, outcome.Destination, null))))
+            {
                 await RetireSourceAsync(download.DownloadPath!, download.Name);
+                await RetireLeftoversAsync(download);
+            }
             return PostDownloadResult.Ok(outcome.Destination);
         }
 
@@ -1549,6 +1555,50 @@ namespace RetroArr.Core.Download
             && client.Implementation.Equals(WatchFolderClient.ImplementationName, StringComparison.OrdinalIgnoreCase);
 
         // A verified source goes to RetroArr's trash (emptied after TrashRetentionDays), or is deleted without one
+        // What a release keeps next to its game: readme, link files, redistributables
+        private static readonly HashSet<string> LeftoverExtensions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ".txt", ".nfo", ".url", ".lnk", ".html", ".htm", ".jpg", ".jpeg", ".png", ".gif", ".webp", ".sfv", ".md5", ".sha1", ".ini", ".log", ".diz"
+        };
+        private static readonly HashSet<string> LeftoverFolders = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "_CommonRedist", "CommonRedist", "Redist", "_Redist", "DirectX", "__MACOSX", "@eaDir", "Support", "_Support"
+        };
+
+        /// <summary>
+        /// After a game went to the trash, the release folder around it ("Castlevania-BC-SteamRIP.com" with only
+        /// _CommonRedist, a readme and a link left) goes too. Never the watch folder itself or its direct subfolders,
+        /// which are the owner's sorting folders (extracted/, usenet/).
+        /// </summary>
+        internal async System.Threading.Tasks.Task RetireLeftoversAsync(DownloadStatus download)
+        {
+            var root = _configService.LoadDownloadClients().FirstOrDefault(c => c.Id == download.ClientId)?.Host;
+            if (string.IsNullOrEmpty(root) || string.IsNullOrEmpty(download.DownloadPath)) return;
+            var rootFull = FullDir(root);
+            var parent = Path.GetDirectoryName(FullDir(download.DownloadPath));
+            while (parent != null && IsUnder(parent, rootFull) && Path.GetRelativePath(rootFull, parent).Split(Path.DirectorySeparatorChar).Length >= 2)
+            {
+                if (!OnlyLeftovers(parent)) return;
+                _logger.Info($"[PostDownload] Only leftovers remain in {parent}, retiring it too");
+                await RetireSourceAsync(parent, Path.GetFileName(parent));
+                parent = Path.GetDirectoryName(parent);
+            }
+        }
+
+        private static bool OnlyLeftovers(string folder)
+        {
+            try
+            {
+                foreach (var entry in new DirectoryInfo(folder).EnumerateFileSystemInfos())
+                {
+                    if (entry.Name.StartsWith('.')) continue;
+                    if (entry is DirectoryInfo dir ? !LeftoverFolders.Contains(dir.Name) : !LeftoverExtensions.Contains(entry.Extension)) return false;
+                }
+                return true;
+            }
+            catch (Exception) { return false; }
+        }
+
         private async System.Threading.Tasks.Task RetireSourceAsync(string source, string title)
         {
             if (IsCriticalPath(source)) return;
