@@ -69,6 +69,17 @@ namespace RetroArr.Core.Test.MetadataSource
             Assert.That(fake.Auth, Is.EqualTo("Bearer sk-test"));
         }
 
+        [TestCase("steam")]
+        [TestCase("gog")]
+        [TestCase("epic")]
+        public async Task AGameFiledUnderAStore_IsAPcGame(string store)
+        {
+            var (ai, fake) = Create($"{{\"platform\": \"{store}\", \"title\": \"Castlevania Belmont's Curse\", \"confidence\": 0.95}}");
+            var guess = await ai.IdentifyAsync("Castlevania Belmonts Curse", new[] { "Castlevania.exe" });
+            Assert.That(guess!.Platform, Is.EqualTo("windows"));
+            Assert.That(fake.Bodies[0], Does.Not.Contain("steam: Steam"), "stores are not offered as platforms");
+        }
+
         [TestCase("{\"platform\": \"wii\", \"title\": \"Something\", \"confidence\": 0.4}")]
         [TestCase("{\"platform\": \"unknown\", \"title\": \"Something\", \"confidence\": 0.9}")]
         [TestCase("{\"platform\": \"toaster\", \"title\": \"Something\", \"confidence\": 0.9}")]

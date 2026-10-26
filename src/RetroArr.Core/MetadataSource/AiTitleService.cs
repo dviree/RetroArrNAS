@@ -45,6 +45,8 @@ namespace RetroArr.Core.MetadataSource
 
         public bool IsEnabled => !string.IsNullOrWhiteSpace(_apiKey);
 
+        private static readonly HashSet<string> StoreFolders = new(StringComparer.OrdinalIgnoreCase) { "steam", "gog", "epic", "moonlight" };
+
         // The two roles of beets-aisauce, each on unless set to false: cleanup turns a release name into a better IGDB
         // query; source lets the model's title stand in where IGDB has nothing that matches
         public bool Cleanup { get; init; } = Flag("AI_CLEANUP");
@@ -81,7 +83,8 @@ namespace RetroArr.Core.MetadataSource
 
         private async Task<Guess?> AskAsync(string releaseName, List<string> files, CancellationToken ct)
         {
-            var platforms = PlatformDefinitions.AllPlatforms.Where(p => p.Enabled && p.FolderName != "unknown")
+            // Store launchers (Steam, GOG, Epic) and front-end folders are not where a downloaded game goes
+            var platforms = PlatformDefinitions.AllPlatforms.Where(p => p.Enabled && p.FolderName != "unknown" && !StoreFolders.Contains(p.FolderName))
                 .Select(p => $"{p.FolderName}: {p.Name}");
             var prompt = $@"You identify video game releases for a game library.
 
@@ -139,6 +142,8 @@ Use the release name, the file names and extensions together. A title ID (PPSA, 
             var platform = Str("platform").ToLowerInvariant();
             var title = Str("title");
             var confidence = root.TryGetProperty("confidence", out var c) && c.TryGetDouble(out var d) ? d : 0;
+            // A game the model files under a store is a PC game
+            if (StoreFolders.Contains(platform)) platform = "windows";
             var known = PlatformDefinitions.AllPlatforms.FirstOrDefault(p => p.FolderName != "unknown" && p.MatchesFolderName(platform));
             if (known == null || string.IsNullOrWhiteSpace(title) || confidence < MinConfidence) return null;
             return new Guess(known.FolderName, title, confidence, Str("reason"));
