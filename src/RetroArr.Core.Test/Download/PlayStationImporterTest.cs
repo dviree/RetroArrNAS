@@ -122,7 +122,7 @@ namespace RetroArr.Core.Test.Download
             Assert.That(Directory.GetFiles(Ps5, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(Ps5, f)), Is.EquivalentTo(new[]
             {
                 "Ghost of Yotei [PPSA26344] [v1.0].exfat",
-                Path.Combine("pkg", "dlc", "Ghost of Yotei [DLC]", "Ghost of Yotei [PPSA26344] [DLC LEGENDSPACK00001].pkg")
+                Path.Combine("pkg", "Ghost of Yotei [DLC]", "Ghost of Yotei [PPSA26344] [DLC LEGENDSPACK00001].pkg")
             }), "the DLC takes the name of the game with its title ID, in the pkg folder");
             Assert.That(Directory.GetFiles(Ps5), Has.Length.EqualTo(1));
         }

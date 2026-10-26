@@ -2919,14 +2919,14 @@ namespace RetroArr.Core.Games
                 if (id.Length == 0 && Directory.Exists(entry)) id = PlayStationPackageInspector.Inspect(entry).TitleId ?? string.Empty;
                 var platformFolder = Path.GetDirectoryName(entry);
                 if (id.Length == 0 || platformFolder == null) return copies;
-                // An entry in ps5/pkg or ps5/pkg/dlc/<Game> [DLC]: the platform folder is above
+                // An entry in ps5/pkg or ps5/pkg/<Game> [DLC]: the platform folder is above
                 while (!Download.PlayStationImporter.IsPlayStation(Path.GetFileName(platformFolder)) && Path.GetDirectoryName(platformFolder) is { } up
                        && platformFolder.Contains(Path.DirectorySeparatorChar + Download.PlayStationImporter.PkgFolder, StringComparison.OrdinalIgnoreCase))
                     platformFolder = up;
                 if (!Download.PlayStationImporter.IsPlayStation(Path.GetFileName(platformFolder))) return copies;
                 var pkgFolder = Path.Combine(platformFolder, Download.PlayStationImporter.PkgFolder);
-                var dlcFolders = Directory.Exists(Path.Combine(pkgFolder, Download.PlayStationImporter.DlcFolder))
-                    ? Directory.EnumerateDirectories(Path.Combine(pkgFolder, Download.PlayStationImporter.DlcFolder))
+                var dlcFolders = Directory.Exists(pkgFolder)
+                    ? Directory.EnumerateDirectories(pkgFolder).Where(d => d.EndsWith(" [DLC]", StringComparison.OrdinalIgnoreCase))
                     : Enumerable.Empty<string>();
                 foreach (var folder in new[] { platformFolder, pkgFolder }.Concat(dlcFolders).Where(Directory.Exists))
                     copies.AddRange(Directory.EnumerateFiles(folder).Where(f =>

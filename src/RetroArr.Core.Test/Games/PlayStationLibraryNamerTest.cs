@@ -96,7 +96,7 @@ namespace RetroArr.Core.Test.Games
         }
 
         [Test]
-        public async Task DlcPkgs_MoveIntoAFolderPerGame_UnderPkgDlc()
+        public async Task DlcPkgs_MoveIntoAFolderPerGame_InPkg()
         {
             File.WriteAllText(Path.Combine(_ps5, "Sackboy A Big Adventure [PPSA01289] [v1.14].exfat"), "game");
             var pkgFolder = Directory.CreateDirectory(Path.Combine(_ps5, "pkg")).FullName;
@@ -111,7 +111,7 @@ namespace RetroArr.Core.Test.Games
 
             await _namer.RunOnceAsync();
 
-            var dlc = Path.Combine(pkgFolder, "dlc", "Sackboy A Big Adventure [DLC]");
+            var dlc = Path.Combine(pkgFolder, "Sackboy A Big Adventure [DLC]");
             Assert.That(Directory.EnumerateFiles(dlc).Select(Path.GetFileName), Is.EquivalentTo(new[]
             {
                 "Sackboy A Big Adventure [PPSA01289] [DLC SABAPC0000000001].pkg", "Sackboy A Big Adventure [PPSA01289] [DLC SABAPC0000000002].pkg"

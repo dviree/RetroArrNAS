@@ -65,9 +65,7 @@ namespace RetroArr.Core.Download
         /// <summary>The subfolder of roms/ps5 that fake PKGs go to, PS_PKG_FOLDER, default "pkg". PS4 has none.</summary>
         public static string PkgFolder => Environment.GetEnvironmentVariable("PS_PKG_FOLDER") is { Length: > 0 } f ? f : "pkg";
 
-        /// <summary>PS5 DLC PKGs go into roms/ps5/pkg/dlc/&lt;Game&gt; [DLC]/, one folder per game.</summary>
-        public const string DlcFolder = "dlc";
-
+        /// <summary>PS5 DLC PKGs go into roms/ps5/pkg/&lt;Game&gt; [DLC]/, one folder per game.</summary>
         internal static string DlcGameFolder(string gameTitle) => SafeTitle(gameTitle) + " [DLC]";
 
         /// <summary>The game's name the library gives a title ID ("Sackboy A Big Adventure" for PPSA01289), from its
@@ -206,11 +204,11 @@ namespace RetroArr.Core.Download
             var folder = package.Format == PlayStationFormat.Pkg && IsPs5(platformFolder) ? Path.Combine(platformPath, PkgFolder) : platformPath;
             Directory.CreateDirectory(platformPath);
             var title = await TitleForAsync(package, source, releaseName, from, platformPath);
-            // A PS5 DLC goes with the other DLC of its game: roms/ps5/pkg/dlc/<Game> [DLC]/
+            // A PS5 DLC goes with the other DLC of its game: roms/ps5/pkg/<Game> [DLC]/
             if (package.Format == PlayStationFormat.Pkg && IsPs5(platformFolder) && package.Content == PlayStationContent.Dlc)
             {
                 var game = (package.TitleId != null ? GameTitleIn(package.TitleId, platformPath, folder) : null) ?? title;
-                folder = Path.Combine(folder, DlcFolder, DlcGameFolder(game));
+                folder = Path.Combine(folder, DlcGameFolder(game));
             }
             Directory.CreateDirectory(folder);
             var extension = isFolderGame ? string.Empty : Path.GetExtension(from).ToLowerInvariant();

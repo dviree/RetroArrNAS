@@ -113,7 +113,7 @@ namespace RetroArr.Core.Games
             return done;
         }
 
-        // DLC PKGs in roms/ps5/pkg go into roms/ps5/pkg/dlc/<Game> [DLC]/, under the same name
+        // DLC PKGs in roms/ps5/pkg go into roms/ps5/pkg/<Game> [DLC]/, under the same name
         private void MoveDlcIntoTheirFolder(string ps5, List<(string, string)> done)
         {
             var pkgFolder = Path.Combine(ps5, PlayStationImporter.PkgFolder);
@@ -137,7 +137,7 @@ namespace RetroArr.Core.Games
             }
         }
 
-        // roms/ps5/pkg/dlc/<Game> [DLC] for a DLC PKG (its name says [DLC ...], or the package does), else null
+        // roms/ps5/pkg/<Game> [DLC] for a DLC PKG (its name says [DLC ...], or the package does), else null
         internal static string? DlcFolderFor(string pkg, string ps5)
         {
             var name = Path.GetFileName(pkg);
@@ -148,7 +148,7 @@ namespace RetroArr.Core.Games
             var game = (id.Length > 0 ? PlayStationImporter.GameTitleIn(id, ps5, pkgFolder) : null)
                 ?? Regex.Replace(name, @"\s*\[.*$", "").Trim();
             if (game.Length == 0) return null;
-            return Path.Combine(pkgFolder, PlayStationImporter.DlcFolder, PlayStationImporter.DlcGameFolder(game));
+            return Path.Combine(pkgFolder, PlayStationImporter.DlcGameFolder(game));
         }
 
         // Loose PKGs in roms/ps5 go into roms/ps5/pkg, under the same name
