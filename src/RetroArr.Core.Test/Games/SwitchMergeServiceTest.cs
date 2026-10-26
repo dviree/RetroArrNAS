@@ -73,6 +73,7 @@ namespace RetroArr.Core.Test.Games
         public void TearDown()
         {
             _service.Dispose();
+            SwitchMergeService.VerifySettle = TimeSpan.FromHours(1);
             Directory.Delete(_root, true);
         }
 
@@ -251,6 +252,30 @@ namespace RetroArr.Core.Test.Games
             Part("Zelda/Zelda [0100F2C0115B6800][v393216].nsp", 30);
             Assert.That(await _service.RunOnceAsync(), Is.EqualTo(0));
             Assert.That(_calls, Is.Empty);
+        }
+
+        [Test]
+        public async Task LibraryCheck_VerifiesEachFileOnce_AndNamesTheBrokenOnes()
+        {
+            File.WriteAllText(_service.NscbRust, "");
+            SwitchMergeService.VerifySettle = TimeSpan.Zero;
+            var good = Part("Mario/Mario [0100000000010000][v0].nsp", 10);
+            var bad = Part("Broken/Broken [0100000000020000][v0].nsz", 10);
+            foreach (var f in new[] { good, bad }) File.SetLastWriteTimeUtc(f, DateTime.UtcNow.AddDays(-1));
+            _service.Run = (args, cwd, timeout, ct) =>
+            {
+                _calls.Add(args);
+                return Task.FromResult((0, args[2] == bad ? "VERDICT: NSZ FILE IS CORRUPT OR MISSES FILES" : "VERDICT: NSZ FILE IS CORRECT\nVERDICT: NSP  FILE IS SAFE"));
+            };
+
+            Assert.That(await _service.VerifyLibraryAsync(TimeSpan.FromHours(1)), Is.EqualTo(2));
+            Assert.That(await _service.VerifyLibraryAsync(TimeSpan.FromHours(1)), Is.Zero, "nothing changed, nothing checked again");
+
+            var state = _service.LoadVerifyState();
+            Assert.That((state[good].Ok, state[bad].Ok), Is.EqualTo((true, false)));
+            var log = File.ReadAllText(Path.Combine(_root, "config", "switch-verify.log"));
+            Assert.That(log, Does.Contain("BROKEN " + bad));
+            Assert.That(File.Exists(bad), Is.True, "nothing is moved or deleted");
         }
     }
 }

@@ -117,7 +117,11 @@ namespace RetroArr.Core.Games
             {
                 try
                 {
-                    if (IsEnabled) await RunOnceAsync(stoppingToken);
+                    if (IsEnabled)
+                    {
+                        await RunOnceAsync(stoppingToken);
+                        await VerifyLibraryAsync(VerifyBudget, stoppingToken);
+                    }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException) { _logger.Warn($"[SwitchMerge] Run failed: {ex.Message}"); }
                 try { await Task.Delay(Interval, stoppingToken); }
@@ -331,7 +335,7 @@ namespace RetroArr.Core.Games
         {
             var verdicts = log.Split('\n').Select(l => l.Trim()).Where(l => l.StartsWith("VERDICT:", StringComparison.OrdinalIgnoreCase)).ToList();
             if (verdicts.Count == 0) return "no verdict";
-            return verdicts.FirstOrDefault(v => !Regex.IsMatch(v, @"^VERDICT:\s+(NSP|XCI|NCA)\s+FILE\s+IS\s+(CORRECT|SAFE)$", RegexOptions.IgnoreCase));
+            return verdicts.FirstOrDefault(v => !Regex.IsMatch(v, @"^VERDICT:\s+(NSP|NSZ|NSX|XCI|XCZ|NCA)\s+FILE\s+IS\s+(CORRECT|SAFE)$", RegexOptions.IgnoreCase));
         }
 
         /// <summary>
@@ -382,6 +386,81 @@ namespace RetroArr.Core.Games
         private static string Tail(string s) => s.Length > 400 ? s[^400..] : s;
 
         private string StatePath => Path.Combine(_config.GetConfigDirectory(), "switch-merge-state.json");
+
+        // ---- Library check: every NSP/XCI/NSZ/XCZ verified once with nscb_rust (lv3), again when it changes ----
+
+        internal sealed record Checked(long Size, DateTime Modified, bool Ok, string Result, DateTime At);
+
+        // How long one round of checks may take before the merges get their turn again
+        internal TimeSpan VerifyBudget = TimeSpan.FromHours(2);
+        internal static TimeSpan VerifySettle = TimeSpan.FromHours(1);
+        private string VerifyStatePath => Path.Combine(_config.GetConfigDirectory(), "switch-verify-state.json");
+
+        /// <summary>
+        /// Verifies the Switch files nobody has checked in their current form, until the budget is spent. Nothing is
+        /// moved or deleted; each result goes to switch-verify.log and a broken file is named there with why.
+        /// Returns how many files were checked.
+        /// </summary>
+        public async Task<int> VerifyLibraryAsync(TimeSpan budget, CancellationToken ct = default)
+        {
+            var library = LibraryFolder;
+            if (library == null || !Directory.Exists(library) || !File.Exists(KeysFile)) return 0;
+            await EnsureRustAsync(ct);
+            if (!UsesRust) return 0;
+            var state = LoadVerifyState();
+            var started = DateTime.UtcNow;
+            var count = 0;
+            var files = Directory.EnumerateFiles(library, "*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true })
+                .Where(f => Mergeable.Contains(Path.GetExtension(f)) && !Path.GetRelativePath(library, f).Split(Path.DirectorySeparatorChar).Any(d => d.StartsWith('.')))
+                .OrderBy(f => f, StringComparer.Ordinal).ToList();
+            foreach (var file in files)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (DateTime.UtcNow - started > budget) break;
+                var info = new FileInfo(file);
+                if (!info.Exists || DateTime.UtcNow - info.LastWriteTimeUtc < VerifySettle) continue;
+                if (state.TryGetValue(file, out var seen) && seen.Size == info.Length && seen.Modified == info.LastWriteTimeUtc) continue;
+
+                var work = Directory.CreateDirectory(Path.Combine(WorkRoot, "verify-" + Guid.NewGuid().ToString("N")[..8])).FullName;
+                try
+                {
+                    var list = Path.Combine(work, "verify.txt");
+                    await File.WriteAllLinesAsync(list, new[] { file }, ct);
+                    var (code, log) = await Run(new[] { NscbRust, "-v", file, "--vertype", "lv3", "--text_file", list, "--keys", KeysFile }, work, TimeSpan.FromHours(3), ct);
+                    var problem = code != 0 ? $"exit {code}: {Tail(log)}" : Verdict(log);
+                    state[file] = new Checked(info.Length, info.LastWriteTimeUtc, problem == null, problem ?? "OK", DateTime.UtcNow);
+                    VerifyNote($"{(problem == null ? "OK    " : "BROKEN")} {file}{(problem == null ? "" : ": " + problem)}");
+                    if (problem != null) _logger.Warn($"[SwitchVerify] {Path.GetFileName(file)} failed verification: {problem}");
+                    count++;
+                }
+                finally
+                {
+                    try { Directory.Delete(work, true); } catch (Exception) { }
+                }
+                // Files that are gone leave the state
+                foreach (var gone in state.Keys.Where(k => !File.Exists(k)).ToList()) state.Remove(gone);
+                SaveVerifyState(state);
+            }
+            return count;
+        }
+
+        internal Dictionary<string, Checked> LoadVerifyState()
+        {
+            try { return File.Exists(VerifyStatePath) ? JsonSerializer.Deserialize<Dictionary<string, Checked>>(File.ReadAllText(VerifyStatePath)) ?? new() : new(); }
+            catch (Exception) { return new(); }
+        }
+
+        private void SaveVerifyState(Dictionary<string, Checked> state)
+        {
+            try { File.WriteAllText(VerifyStatePath, JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true })); }
+            catch (Exception ex) { _logger.Warn($"[SwitchVerify] Could not save state: {ex.Message}"); }
+        }
+
+        private void VerifyNote(string line)
+        {
+            try { File.AppendAllText(Path.Combine(_config.GetConfigDirectory(), "switch-verify.log"), $"{DateTime.UtcNow:o} {line}{Environment.NewLine}"); }
+            catch (Exception) { }
+        }
 
         private Dictionary<string, DateTime> LoadState()
         {
