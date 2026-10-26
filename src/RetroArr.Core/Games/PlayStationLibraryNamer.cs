@@ -58,6 +58,8 @@ namespace RetroArr.Core.Games
             }
         }
 
+        private readonly HashSet<string> _ps5Folders = new(StringComparer.Ordinal);
+
         public IEnumerable<string> Folders()
         {
             var media = _config.LoadMediaSettings();
@@ -66,7 +68,11 @@ namespace RetroArr.Core.Games
                 foreach (var p in new[] { "ps5", "ps4" })
                 {
                     var platform = PlatformDefinitions.AllPlatforms.FirstOrDefault(x => x.MatchesFolderName(p));
-                    yield return Path.Combine(root, platform?.GetEffectiveFolderName(media.FolderNamingMode) ?? p);
+                    var folder = Path.Combine(root, platform?.GetEffectiveFolderName(media.FolderNamingMode) ?? p);
+                    if (p == "ps5") _ps5Folders.Add(folder);
+                    yield return folder;
+                    // Only PS5 has a pkg folder
+                    if (p == "ps5") yield return Path.Combine(folder, PlayStationImporter.PkgFolder);
                 }
             }
 
@@ -86,7 +92,7 @@ namespace RetroArr.Core.Games
                     var name = Path.GetFileName(entry);
                     if (name.StartsWith('.')) continue;
                     // LZ4 folders are the owner's to manage and keep the name they have
-                if (!NeedsName(name) || PlayStationImporter.KindOf(entry) == PlayStationFormat.Lz4Folder || RecentlyWritten(entry)) continue;
+                    if (!NeedsName(name) || PlayStationImporter.KindOf(entry) == PlayStationFormat.Lz4Folder || RecentlyWritten(entry)) continue;
                     var target = await NewNameAsync(entry);
                     if (target == null || target == name) continue;
                     var to = Path.Combine(folder, target);
@@ -107,7 +113,8 @@ namespace RetroArr.Core.Games
         // Loose PKGs in roms/ps5 go into roms/ps5/pkg, under the same name
         private void MovePkgsIntoTheirFolder(string folder, List<(string, string)> done)
         {
-            if (Path.GetFileName(folder).Equals(PlayStationImporter.PkgFolder, StringComparison.OrdinalIgnoreCase)) return;
+            // Only PS5 has a pkg folder; PS4 PKGs stay where they are
+            if (Path.GetFileName(folder).Equals(PlayStationImporter.PkgFolder, StringComparison.OrdinalIgnoreCase) || !_ps5Folders.Contains(folder)) return;
             List<string> pkgs;
             try { pkgs = Directory.EnumerateFiles(folder, "*.pkg").Where(f => !Path.GetFileName(f).StartsWith('.')).ToList(); }
             catch (Exception) { return; }

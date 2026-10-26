@@ -59,8 +59,12 @@ namespace RetroArr.Core.Download
         public static bool ImportFolders =>
             !string.Equals(Environment.GetEnvironmentVariable("PS_IMPORT_FOLDERS"), "false", StringComparison.OrdinalIgnoreCase);
 
-        /// <summary>The subfolder of roms/ps5 (and ps4) that fake PKGs go to, PS_PKG_FOLDER, default "pkg".</summary>
+        /// <summary>The subfolder of roms/ps5 that fake PKGs go to, PS_PKG_FOLDER, default "pkg". PS4 has none.</summary>
         public static string PkgFolder => Environment.GetEnvironmentVariable("PS_PKG_FOLDER") is { Length: > 0 } f ? f : "pkg";
+
+        public static bool IsPs5(string? platformFolder) =>
+            PlatformDefinitions.AllPlatforms.FirstOrDefault(p => p.MatchesFolderName(platformFolder ?? string.Empty))?.MatchesFolderName("ps5") == true
+            || string.Equals(platformFolder, "ps5", StringComparison.OrdinalIgnoreCase);
 
         public static bool IsPlayStation(string? platformFolder) =>
             string.Equals(platformFolder, "ps5", StringComparison.OrdinalIgnoreCase) || string.Equals(platformFolder, "ps4", StringComparison.OrdinalIgnoreCase);
@@ -171,9 +175,9 @@ namespace RetroArr.Core.Download
                 if (images > 1) return Outcome.Fail($"{images} {ext} files in one folder: add the folder as a recursive watch so each is its own game");
             }
 
-            // Fake PKGs get a folder of their own (roms/ps5/pkg); everything else lies in roms/ps5
+            // PS5 fake PKGs get a folder of their own (roms/ps5/pkg); everything else, PS4 PKGs too, lies in the platform folder
             var platformPath = Path.Combine(libraryRoot, platformFolder);
-            var folder = package.Format == PlayStationFormat.Pkg ? Path.Combine(platformPath, PkgFolder) : platformPath;
+            var folder = package.Format == PlayStationFormat.Pkg && IsPs5(platformFolder) ? Path.Combine(platformPath, PkgFolder) : platformPath;
             Directory.CreateDirectory(folder);
             var title = await TitleForAsync(package, source, releaseName, from, platformPath);
             var extension = isFolderGame ? string.Empty : Path.GetExtension(from).ToLowerInvariant();

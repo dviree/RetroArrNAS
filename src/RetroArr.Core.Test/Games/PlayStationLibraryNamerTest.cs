@@ -95,6 +95,20 @@ namespace RetroArr.Core.Test.Games
         }
 
         [Test]
+        public async Task Ps4Pkgs_StayInThePs4Folder()
+        {
+            var ps4 = Directory.CreateDirectory(_namer.Folders().First(f => f.EndsWith("ps4", StringComparison.Ordinal))).FullName;
+            var pkg = Path.Combine(ps4, "Bloodborne [CUSA00900] [v1.09].pkg");
+            File.WriteAllText(pkg, "pkg");
+            File.SetLastWriteTimeUtc(pkg, DateTime.UtcNow.AddDays(-1));
+
+            await _namer.RunOnceAsync();
+
+            Assert.That(File.Exists(pkg), Is.True);
+            Assert.That(Directory.Exists(Path.Combine(ps4, "pkg")), Is.False);
+        }
+
+        [Test]
         public async Task NamedOrBusyFolders_AreLeftAlone()
         {
             Game(_lz4, "FINAL FANTASY VII REMAKE [PPSA01903] [v1.5]-lz4");
