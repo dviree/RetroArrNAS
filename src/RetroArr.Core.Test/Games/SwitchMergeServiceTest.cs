@@ -166,5 +166,47 @@ namespace RetroArr.Core.Test.Games
         {
             Assert.That(SwitchMergeService.Verdict(log), Is.EqualTo(problem));
         }
+
+        // A PFS0 header whose string table names these files, followed by padding
+        private string Nsp(string relative, params string[] names)
+        {
+            var table = System.Text.Encoding.ASCII.GetBytes(string.Join("\0", names) + "\0");
+            using var stream = new MemoryStream();
+            using (var writer = new BinaryWriter(stream, System.Text.Encoding.ASCII, leaveOpen: true))
+            {
+                writer.Write(0x30534650);
+                writer.Write(names.Length);
+                writer.Write(table.Length);
+                writer.Write(0);
+                var offset = 0;
+                foreach (var name in names)
+                {
+                    writer.Write(0L); writer.Write(10L); writer.Write(offset); writer.Write(0);
+                    offset += name.Length + 1;
+                }
+                writer.Write(table);
+                writer.Write(new byte[64]);
+            }
+            var path = Path.Combine(_switch, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllBytes(path, stream.ToArray());
+            return path;
+        }
+
+        [Test]
+        public void NamesWithoutTitleId_AreReadFromTheTicketInsideTheNsp()
+        {
+            Nsp("Inazuma/INAZUMA ELEVEN Victory Road.nsp", "1234abcd.nca", "0100A6301214E0000000000000000004.tik", "0100A6301214E0000000000000000004.cert");
+            Nsp("Inazuma/INAZUMA ELEVEN DLC 1.nsp", "0100A6301214F0010000000000000004.tik");
+            Nsp("Inazuma/INAZUMA ELEVEN Update v131072.nsp", "0100A6301214E8000000000000000004.tik");
+            Nsp("Inazuma/No ticket.nsp", "abcd.nca");
+
+            var parts = SwitchMergeService.Scan(_switch).OrderBy(p => p.TitleId).ToList();
+            Assert.That(parts.Select(p => (p.TitleId, p.Version)), Is.EqualTo(new[]
+            {
+                (0x0100A6301214E000UL, 0), (0x0100A6301214E800UL, 131072), (0x0100A6301214F001UL, 0)
+            }));
+            Assert.That(SwitchMergeService.Plan(parts).Single().Inputs.Count(), Is.EqualTo(3));
+        }
     }
 }

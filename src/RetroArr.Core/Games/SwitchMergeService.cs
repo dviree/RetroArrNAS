@@ -124,6 +124,29 @@ namespace RetroArr.Core.Games
 
         private static readonly Regex TitleIdRegex = new(@"\[([0-9A-Fa-f]{16})\]");
         private static readonly Regex VersionRegex = new(@"\[v(\d+)\]", RegexOptions.IgnoreCase);
+        private static readonly Regex LooseVersionRegex = new(@"(?<![A-Za-z0-9])v(\d+)(?![\d.])", RegexOptions.IgnoreCase);
+        private static readonly Regex TicketName = new(@"^([0-9A-Fa-f]{16})[0-9A-Fa-f]{16}\.tik$");
+
+        /// <summary>The title ID of an NSP from the name of its ticket ("0100ABCD12340000000000000000000A.tik"); null without one.</summary>
+        internal static string? NspTitleId(string file)
+        {
+            if (!Path.GetExtension(file).Equals(".nsp", StringComparison.OrdinalIgnoreCase)) return null;
+            try
+            {
+                using var stream = File.OpenRead(file);
+                using var reader = new BinaryReader(stream);
+                if (stream.Length < 16 || reader.ReadUInt32() != 0x30534650) return null; // "PFS0"
+                var count = reader.ReadInt32();
+                var tableSize = reader.ReadInt32();
+                reader.ReadInt32();
+                if (count is <= 0 or > 4096 || tableSize is <= 0 or > 1 << 20) return null;
+                stream.Seek(16 + count * 0x18L, SeekOrigin.Begin);
+                var names = System.Text.Encoding.ASCII.GetString(reader.ReadBytes(tableSize)).Split('\0');
+                return names.Select(n => TicketName.Match(n)).FirstOrDefault(m => m.Success)?.Groups[1].Value.ToUpperInvariant();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+        }
+
         private static readonly HashSet<string> Mergeable = new(StringComparer.OrdinalIgnoreCase) { ".nsp", ".xci" };
 
         /// <summary>The .nsp/.xci files under the library that carry a title ID in their name.</summary>
@@ -136,9 +159,11 @@ namespace RetroArr.Core.Games
                 if (name.StartsWith('.') || !Mergeable.Contains(Path.GetExtension(file))) continue;
                 if (Path.GetRelativePath(library, file).Split(Path.DirectorySeparatorChar).Any(d => d.StartsWith('.'))) continue;
                 var id = TitleIdRegex.Match(name);
-                if (!id.Success) continue;
-                var version = VersionRegex.Match(name);
-                parts.Add(new Part(file, Convert.ToUInt64(id.Groups[1].Value, 16), version.Success ? int.Parse(version.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) : 0,
+                // A name without its title ID ("INAZUMA ELEVEN DLC.nsp"): the ticket inside the NSP is named after it
+                var titleId = id.Success ? id.Groups[1].Value : NspTitleId(file);
+                if (titleId == null) continue;
+                var version = VersionRegex.Match(name) is { Success: true } v ? v : LooseVersionRegex.Match(Path.GetFileNameWithoutExtension(name));
+                parts.Add(new Part(file, Convert.ToUInt64(titleId, 16), version.Success ? int.Parse(version.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) : 0,
                     new FileInfo(file).Length));
             }
             return parts;
