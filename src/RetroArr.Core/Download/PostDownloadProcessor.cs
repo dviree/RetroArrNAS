@@ -1530,7 +1530,8 @@ namespace RetroArr.Core.Download
             if (!outcome.Success) return PostDownloadResult.Fail(outcome.Reason ?? "PlayStation import failed");
             try { await AddMovedGameToLibraryAsync(outcome.Title ?? download.Name, outcome.Destination!, false, _metadataFactory.CreateService(), download.PlatformFolder, false); }
             catch (Exception ex) { _logger.Warn($"[PostDownload] {outcome.Destination} is in the library folder but not yet in the list, the next scan adds it: {ex.Message}"); }
-            if (moveAfterImport && (outcome.Unpacked || (outcome.VerifyFrom != null && SourceVerified(outcome.VerifyFrom, outcome.Destination, null))))
+            // A release of a game the library already has (an LZ4 folder in roms/ps5 means LZ4 works) goes too
+            if (moveAfterImport && (outcome.Unpacked || outcome.AlreadyInLibrary || (outcome.VerifyFrom != null && SourceVerified(outcome.VerifyFrom, outcome.Destination, null))))
                 await RetireSourceAsync(download.DownloadPath!, download.Name);
             return PostDownloadResult.Ok(outcome.Destination);
         }

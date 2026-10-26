@@ -238,7 +238,7 @@ namespace RetroArr.Core.Test.Download
         }
 
         [Test]
-        public async Task ArchivedLz4GameThatTheLz4LibraryHas_IsNotUnpacked()
+        public async Task GameOnlyInTheLz4TestLibrary_IsImported()
         {
             var lz4 = Directory.CreateDirectory(Path.Combine(_root, "ps5-lz4", "FINAL FANTASY VII REMAKE [PPSA01903] [v1.10]-lz4")).FullName;
             Environment.SetEnvironmentVariable("PS_LIBRARY_EXTRA", Path.GetDirectoryName(lz4));
@@ -250,8 +250,9 @@ namespace RetroArr.Core.Test.Download
             var result = await Import(archive);
 
             Assert.That(result.Success, Is.True, result.Reason);
-            Assert.That(result.Destination, Is.EqualTo(lz4));
-            Assert.That(Directory.Exists(Ps5) ? Directory.GetFileSystemEntries(Ps5) : Array.Empty<string>(), Is.Empty);
+            Assert.That(result.AlreadyInLibrary, Is.False, "the LZ4 library is a test bench, not the library");
+            Assert.That(Directory.GetDirectories(Ps5).Single(), Does.Contain("[PPSA01903]"));
+            Assert.That(Directory.Exists(lz4), Is.True);
         }
 
         [Test]
@@ -267,6 +268,16 @@ namespace RetroArr.Core.Test.Download
             Assert.That(result.Success, Is.True, result.Reason);
             Assert.That(File.Exists(pkg) && Directory.Exists(lz4), Is.True, "nothing is put in the trash");
             Assert.That(Directory.GetFiles(Ps5), Has.Length.EqualTo(1), "a game that is there in some form is not added again");
+        }
+
+        [Test]
+        public async Task AnLz4FolderInTheLibrary_MakesTheReleaseAlreadyThere_SoItCanGo()
+        {
+            Directory.CreateDirectory(Path.Combine(Ps5, "Onimusha [PPSA01903]-lz4"));
+            var result = await Import(Image("ff7r.exfat"));
+            Assert.That(result.Success, Is.True, result.Reason);
+            Assert.That(result.AlreadyInLibrary, Is.True);
+            Assert.That(Directory.GetFiles(Ps5), Is.Empty);
         }
 
         [Test]

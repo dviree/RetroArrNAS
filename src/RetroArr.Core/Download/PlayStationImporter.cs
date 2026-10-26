@@ -29,7 +29,10 @@ namespace RetroArr.Core.Download
 
         // Unpacked: the release was an archive, unpacked to staging and imported from there; the archive itself
         // has no twin in the library to verify against, a clean unpack and import is its verification
-        public sealed record Outcome(bool Success, string? Destination, string? Reason, string? Title = null, string? VerifyFrom = null, bool Unpacked = false)
+        // AlreadyInLibrary: the game is in roms in some form, nothing was added; a watch folder in move mode lets the
+        // release go to the trash
+        public sealed record Outcome(bool Success, string? Destination, string? Reason, string? Title = null, string? VerifyFrom = null, bool Unpacked = false,
+            bool AlreadyInLibrary = false)
         {
             public static Outcome Fail(string reason) => new(false, null, reason);
         }
@@ -78,7 +81,7 @@ namespace RetroArr.Core.Download
                 if (there != null)
                 {
                     _logger.Info($"[PlayStation] {releaseName}: {package.TitleId} is already in {there}, nothing unpacked");
-                    return Task.FromResult(new Outcome(true, there, null));
+                    return Task.FromResult(new Outcome(true, there, null, AlreadyInLibrary: true));
                 }
                 return ImportArchiveAsync(source, releaseName, libraryRoot, platformFolder);
             }
@@ -199,16 +202,16 @@ namespace RetroArr.Core.Download
                 if (!IsOlder(existing, package.Version))
                 {
                     _logger.Info($"[PlayStation] {releaseName}: already in the library as {Path.GetFileName(existing)} ({kind}), not added");
-                    return new Outcome(true, existing, null, title);
+                    return new Outcome(true, existing, null, title, AlreadyInLibrary: true);
                 }
                 if (kind == package.Format && kind != PlayStationFormat.Lz4Folder) older.Add(existing);
             }
-            // The other PlayStation libraries (the LZ4 one) and folders one level down are only looked at, never changed
+            // Folders one level down (roms/ps5/pkg, roms/ps5/_extracted) are only looked at, never changed
             var elsewhere = InOtherLibraries(package, platformPath).FirstOrDefault(e => !older.Contains(e) && !IsOlder(e, package.Version));
             if (elsewhere != null)
             {
                 _logger.Info($"[PlayStation] {releaseName} is already in {elsewhere}, not added");
-                return new Outcome(true, elsewhere, null, title);
+                return new Outcome(true, elsewhere, null, title, AlreadyInLibrary: true);
             }
             if (File.Exists(target) || Directory.Exists(target))
                 return Outcome.Fail($"{name} is already in the library and is not the same release");
@@ -328,7 +331,9 @@ namespace RetroArr.Core.Download
         private static IEnumerable<string> InOtherLibraries(PlayStationPackage package, string? main = null)
         {
             if (package.TitleId == null || package.Content == PlayStationContent.Dlc) yield break;
-            foreach (var library in OtherLibraries.Append(main).OfType<string>().Where(Directory.Exists))
+            // Only the library itself counts: the LZ4 library (PS_LIBRARY_EXTRA) is the owner's test bench, a game there
+            // is not in the library yet
+            foreach (var library in new[] { main }.OfType<string>().Where(Directory.Exists))
             {
                 List<string> entries;
                 try
