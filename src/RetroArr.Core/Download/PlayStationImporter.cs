@@ -68,6 +68,28 @@ namespace RetroArr.Core.Download
         /// <summary>PS5 DLC PKGs go into roms/ps5/pkg/&lt;Game&gt; [DLC]/, one folder per game.</summary>
         internal static string DlcGameFolder(string gameTitle) => SafeTitle(gameTitle) + " [DLC]";
 
+        /// <summary>
+        /// The folder in roms/ps4 that holds every PKG of a PS4 game (base, updates, DLC): one whose name carries the
+        /// title ID, or that holds a PKG of it already ("Ghostbusters/..."), else "&lt;Game&gt; [CUSA01234]".
+        /// </summary>
+        internal static string Ps4GameFolder(string ps4, string titleId, string gameTitle)
+        {
+            var tag = "[" + titleId + "]";
+            if (Directory.Exists(ps4))
+                foreach (var dir in Directory.EnumerateDirectories(ps4).Where(d => !Path.GetFileName(d).StartsWith('.')))
+                {
+                    if (Path.GetFileName(dir).Contains(tag, StringComparison.OrdinalIgnoreCase)) return dir;
+                    try
+                    {
+                        if (Directory.EnumerateFiles(dir, "*.pkg").Any(f => (PlayStationPackageInspector.TitleIdIn(Path.GetFileName(f)) is { Length: > 0 } id
+                                ? id : PlayStationPackageInspector.Inspect(f).TitleId ?? string.Empty).Equals(titleId, StringComparison.OrdinalIgnoreCase)))
+                            return dir;
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+                }
+            return Path.Combine(ps4, SafeTitle(gameTitle) + " " + tag);
+        }
+
         /// <summary>The game's name the library gives a title ID ("Sackboy A Big Adventure" for PPSA01289), from its
         /// non-DLC entries in these folders; null when there is none.</summary>
         internal static string? GameTitleIn(string titleId, params string[] folders)
@@ -210,6 +232,10 @@ namespace RetroArr.Core.Download
                 var game = (package.TitleId != null ? GameTitleIn(package.TitleId, platformPath, folder) : null) ?? title;
                 folder = Path.Combine(folder, DlcGameFolder(game));
             }
+            // A PS4 PKG goes into its game's folder, with the game's other PKGs: roms/ps4/<Game> [CUSA01234]/
+            var ps4Pkg = package.Format == PlayStationFormat.Pkg && !IsPs5(platformFolder) && package.TitleId != null;
+            if (ps4Pkg)
+                folder = Ps4GameFolder(platformPath, package.TitleId!, GameTitleIn(package.TitleId!, platformPath) ?? title);
             Directory.CreateDirectory(folder);
             var extension = isFolderGame ? string.Empty : Path.GetExtension(from).ToLowerInvariant();
             var name = BuildName(title, package, extension);
@@ -222,7 +248,9 @@ namespace RetroArr.Core.Download
             // PKGs are kept on their own: a PKG is added even when the game is there as an LZ4 folder, a folder or an
             // image, and those never stop or replace a PKG
             var isPkg = package.Format == PlayStationFormat.Pkg;
-            foreach (var existing in SameGame(folder, package, name).Where(e => (KindOf(e) == PlayStationFormat.Pkg) == isPkg))
+            // A PS4 PKG still loose in roms/ps4 (not moved into its game's folder yet) counts too
+            var candidates = ps4Pkg ? SameGame(folder, package, name).Concat(SameGame(platformPath, package, name)) : SameGame(folder, package, name);
+            foreach (var existing in candidates.Where(e => (KindOf(e) == PlayStationFormat.Pkg) == isPkg))
             {
                 var kind = KindOf(existing);
                 if (kind == package.Format && SizeOf(existing) == SizeOf(from))

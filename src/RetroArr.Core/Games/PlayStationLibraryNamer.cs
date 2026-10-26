@@ -59,6 +59,7 @@ namespace RetroArr.Core.Games
         }
 
         private readonly HashSet<string> _ps5Folders = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _ps4Folders = new(StringComparer.Ordinal);
 
         public IEnumerable<string> Folders()
         {
@@ -69,7 +70,7 @@ namespace RetroArr.Core.Games
                 {
                     var platform = PlatformDefinitions.AllPlatforms.FirstOrDefault(x => x.MatchesFolderName(p));
                     var folder = Path.Combine(root, platform?.GetEffectiveFolderName(media.FolderNamingMode) ?? p);
-                    if (p == "ps5") _ps5Folders.Add(folder);
+                    if (p == "ps5") _ps5Folders.Add(folder); else _ps4Folders.Add(folder);
                     yield return folder;
                     // Only PS5 has a pkg folder
                     if (p == "ps5") yield return Path.Combine(folder, PlayStationImporter.PkgFolder);
@@ -86,6 +87,7 @@ namespace RetroArr.Core.Games
             {
                 MovePkgsIntoTheirFolder(folder, done);
                 if (_ps5Folders.Contains(folder)) MoveDlcIntoTheirFolder(folder, done);
+                else if (_ps4Folders.Contains(folder)) MovePs4PkgsIntoGameFolders(folder, done);
                 List<string> entries;
                 try { entries = Directory.EnumerateFileSystemEntries(folder).ToList(); }
                 catch (Exception ex) { _logger.Warn($"[PSNames] Cannot read {folder}: {ex.Message}"); continue; }
@@ -111,6 +113,32 @@ namespace RetroArr.Core.Games
             }
             if (done.Count > 0) Remember(done);
             return done;
+        }
+
+        // Loose PKGs in roms/ps4 go into their game's folder (roms/ps4/<Game> [CUSA01234]/), under the same name
+        private void MovePs4PkgsIntoGameFolders(string ps4, List<(string, string)> done)
+        {
+            List<string> pkgs;
+            try { pkgs = Directory.EnumerateFiles(ps4, "*.pkg").Where(f => !Path.GetFileName(f).StartsWith('.')).ToList(); }
+            catch (Exception) { return; }
+            foreach (var pkg in pkgs.Where(p => !RecentlyWritten(p)))
+            {
+                var name = Path.GetFileName(pkg);
+                var id = PlayStationPackageInspector.TitleIdIn(name) is { Length: > 0 } fromName ? fromName : PlayStationPackageInspector.Inspect(pkg).TitleId;
+                if (string.IsNullOrEmpty(id)) continue;
+                var game = PlayStationImporter.GameTitleIn(id, ps4) ?? Regex.Replace(name, @"\s*\[.*$", "").Trim();
+                if (game.Length == 0) continue;
+                var to = Path.Combine(PlayStationImporter.Ps4GameFolder(ps4, id, game), name);
+                if (File.Exists(to)) continue;
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(to)!);
+                    Rename(pkg, to);
+                    done.Add((pkg, to));
+                    _logger.Info($"[PSNames] Moved {name} into {Path.GetDirectoryName(to)}");
+                }
+                catch (Exception ex) { _logger.Warn($"[PSNames] Could not move {pkg}: {ex.Message}"); }
+            }
         }
 
         // DLC PKGs in roms/ps5/pkg go into roms/ps5/pkg/<Game> [DLC]/, under the same name

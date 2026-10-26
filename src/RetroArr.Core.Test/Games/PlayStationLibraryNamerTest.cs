@@ -120,16 +120,28 @@ namespace RetroArr.Core.Test.Games
         }
 
         [Test]
-        public async Task Ps4Pkgs_StayInThePs4Folder()
+        public async Task Ps4Pkgs_GoIntoOneFolderPerGame_NoPkgFolder()
         {
             var ps4 = Directory.CreateDirectory(_namer.Folders().First(f => f.EndsWith("ps4", StringComparison.Ordinal))).FullName;
-            var pkg = Path.Combine(ps4, "Bloodborne [CUSA00900] [v1.09].pkg");
-            File.WriteAllText(pkg, "pkg");
-            File.SetLastWriteTimeUtc(pkg, DateTime.UtcNow.AddDays(-1));
+            var existing = Directory.CreateDirectory(Path.Combine(ps4, "Ghostbusters")).FullName;
+            File.WriteAllText(Path.Combine(existing, "Ghostbusters [CUSA12345] [v1.00].pkg"), "base");
+            var loose = new[]
+            {
+                Path.Combine(ps4, "Bloodborne [CUSA00900] [v1.09].pkg"),
+                Path.Combine(ps4, "Bloodborne [CUSA00900] [DLC THEOLDHUNTERS].pkg"),
+                Path.Combine(ps4, "Ghostbusters [CUSA12345] [Update] [v1.02].pkg"),
+            };
+            foreach (var f in loose)
+            {
+                File.WriteAllText(f, "pkg");
+                File.SetLastWriteTimeUtc(f, DateTime.UtcNow.AddDays(-1));
+            }
 
             await _namer.RunOnceAsync();
 
-            Assert.That(File.Exists(pkg), Is.True);
+            Assert.That(Directory.EnumerateFiles(ps4), Is.Empty, "no loose PKGs left");
+            Assert.That(Directory.EnumerateFiles(Path.Combine(ps4, "Bloodborne [CUSA00900]")).Count(), Is.EqualTo(2), "base and DLC together");
+            Assert.That(Directory.EnumerateFiles(existing).Count(), Is.EqualTo(2), "the update joins the folder the game is in already");
             Assert.That(Directory.Exists(Path.Combine(ps4, "pkg")), Is.False);
         }
 

@@ -375,5 +375,21 @@ namespace RetroArr.Core.Test.Download
             Assert.That(name, Does.EndWith(" [PPSA01903] [v1.10].exfat"));
             Assert.That(PlayStationImporter.SafeTitle("FINAL FANTASY VII REMAKE™: Intergrade"), Is.EqualTo("FINAL FANTASY VII REMAKE Intergrade"));
         }
+
+        [Test]
+        public async Task Ps4Pkgs_LandInTheGamesFolder_WithItsOtherPkgs()
+        {
+            var ps4 = Path.Combine(_library, "ps4");
+            var game = Directory.CreateDirectory(Path.Combine(ps4, "Ghostbusters")).FullName;
+            File.WriteAllText(Path.Combine(game, "Ghostbusters [CUSA12345] [v1.00].pkg"), "base");
+            var dlc = Path.Combine(_inbox, "EP0000-CUSA12345_00-SLIMERPACK000001 DLC.pkg");
+            File.WriteAllText(dlc, "dlc");
+
+            var result = await _importer.ImportAsync(dlc, Path.GetFileName(dlc), _library, "ps4");
+
+            Assert.That(result.Success, Is.True, result.Reason);
+            Assert.That(Path.GetDirectoryName(result.Destination), Is.EqualTo(game));
+            Assert.That(Directory.EnumerateFiles(ps4), Is.Empty);
+        }
     }
 }
