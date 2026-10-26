@@ -96,6 +96,30 @@ namespace RetroArr.Core.Test.Games
         }
 
         [Test]
+        public async Task DlcPkgs_MoveIntoAFolderPerGame_UnderPkgDlc()
+        {
+            File.WriteAllText(Path.Combine(_ps5, "Sackboy A Big Adventure [PPSA01289] [v1.14].exfat"), "game");
+            var pkgFolder = Directory.CreateDirectory(Path.Combine(_ps5, "pkg")).FullName;
+            var inPkg = Path.Combine(pkgFolder, "Sackboy A Big Adventure [PPSA01289] [DLC SABAPC0000000001].pkg");
+            var loose = Path.Combine(_ps5, "Sackboy A Big Adventure [PPSA01289] [DLC SABAPC0000000002].pkg");
+            var game = Path.Combine(pkgFolder, "Onimusha [PPSA27836] [v1.0].pkg");
+            foreach (var f in new[] { inPkg, loose, game })
+            {
+                File.WriteAllText(f, "pkg");
+                File.SetLastWriteTimeUtc(f, DateTime.UtcNow.AddDays(-1));
+            }
+
+            await _namer.RunOnceAsync();
+
+            var dlc = Path.Combine(pkgFolder, "dlc", "Sackboy A Big Adventure [DLC]");
+            Assert.That(Directory.EnumerateFiles(dlc).Select(Path.GetFileName), Is.EquivalentTo(new[]
+            {
+                "Sackboy A Big Adventure [PPSA01289] [DLC SABAPC0000000001].pkg", "Sackboy A Big Adventure [PPSA01289] [DLC SABAPC0000000002].pkg"
+            }));
+            Assert.That(File.Exists(game), Is.True, "a game PKG stays in pkg");
+        }
+
+        [Test]
         public async Task Ps4Pkgs_StayInThePs4Folder()
         {
             var ps4 = Directory.CreateDirectory(_namer.Folders().First(f => f.EndsWith("ps4", StringComparison.Ordinal))).FullName;

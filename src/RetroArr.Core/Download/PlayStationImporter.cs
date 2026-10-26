@@ -65,6 +65,22 @@ namespace RetroArr.Core.Download
         /// <summary>The subfolder of roms/ps5 that fake PKGs go to, PS_PKG_FOLDER, default "pkg". PS4 has none.</summary>
         public static string PkgFolder => Environment.GetEnvironmentVariable("PS_PKG_FOLDER") is { Length: > 0 } f ? f : "pkg";
 
+        /// <summary>PS5 DLC PKGs go into roms/ps5/pkg/dlc/&lt;Game&gt; [DLC]/, one folder per game.</summary>
+        public const string DlcFolder = "dlc";
+
+        internal static string DlcGameFolder(string gameTitle) => SafeTitle(gameTitle) + " [DLC]";
+
+        /// <summary>The game's name the library gives a title ID ("Sackboy A Big Adventure" for PPSA01289), from its
+        /// non-DLC entries in these folders; null when there is none.</summary>
+        internal static string? GameTitleIn(string titleId, params string[] folders)
+        {
+            var tag = " [" + titleId + "]";
+            return folders.Where(Directory.Exists).SelectMany(f => Directory.EnumerateFileSystemEntries(f)).Select(Path.GetFileName)
+                .Where(n => n != null && !n.StartsWith('.') && n.Contains(tag, StringComparison.OrdinalIgnoreCase) && !n.Contains("[DLC", StringComparison.OrdinalIgnoreCase))
+                .Select(n => n![..n!.IndexOf(tag, StringComparison.OrdinalIgnoreCase)].Trim())
+                .FirstOrDefault(t => t.Length > 0);
+        }
+
         /// <summary>"ps5" for PPSA/ECAS, "ps4" for CUSA, null when there is no title ID.</summary>
         public static string? PlatformForTitleId(string? titleId) =>
             string.IsNullOrEmpty(titleId) ? null
@@ -188,8 +204,15 @@ namespace RetroArr.Core.Download
             // PS5 fake PKGs get a folder of their own (roms/ps5/pkg); everything else, PS4 PKGs too, lies in the platform folder
             var platformPath = Path.Combine(libraryRoot, platformFolder);
             var folder = package.Format == PlayStationFormat.Pkg && IsPs5(platformFolder) ? Path.Combine(platformPath, PkgFolder) : platformPath;
-            Directory.CreateDirectory(folder);
+            Directory.CreateDirectory(platformPath);
             var title = await TitleForAsync(package, source, releaseName, from, platformPath);
+            // A PS5 DLC goes with the other DLC of its game: roms/ps5/pkg/dlc/<Game> [DLC]/
+            if (package.Format == PlayStationFormat.Pkg && IsPs5(platformFolder) && package.Content == PlayStationContent.Dlc)
+            {
+                var game = (package.TitleId != null ? GameTitleIn(package.TitleId, platformPath, folder) : null) ?? title;
+                folder = Path.Combine(folder, DlcFolder, DlcGameFolder(game));
+            }
+            Directory.CreateDirectory(folder);
             var extension = isFolderGame ? string.Empty : Path.GetExtension(from).ToLowerInvariant();
             var name = BuildName(title, package, extension);
             var target = Path.Combine(folder, name);
