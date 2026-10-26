@@ -20,7 +20,7 @@ namespace RetroArr.Core.Games
     /// real name: "Ghost of Yotei [PPSA26344] [v1.0]". LZ4 folders and the other libraries (PS_LIBRARY_EXTRA, the LZ4
     /// library) are renamed in place too, keeping their -lz4 ending; nothing is ever moved out of them.
     /// The title comes from the game's own param.json/param.sfo, else from the AI. Names that already carry a title are
-    /// left alone, as is anything written to in the last hour (a converter may be at work). Every rename is logged
+    /// left alone, as is anything written to in the last six hours (a converter may be at work). Every rename is logged
     /// to ps-renames.json in the config folder, so it can be undone.
     /// </summary>
     [SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes")]
@@ -32,7 +32,7 @@ namespace RetroArr.Core.Games
         private readonly AiTitleService? _ai;
 
         internal TimeSpan Interval = TimeSpan.FromHours(1);
-        internal static TimeSpan QuietFor = TimeSpan.FromHours(1);
+        internal static TimeSpan QuietFor = TimeSpan.FromHours(6);
         // internal for tests: the rename itself, so a read-only mount can be renamed through the shared one
         internal Action<string, string> Rename = Move;
 
