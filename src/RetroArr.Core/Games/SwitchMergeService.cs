@@ -110,10 +110,11 @@ namespace RetroArr.Core.Games
                 ct.ThrowIfCancellationRequested();
                 if (state.TryGetValue(family.Fingerprint, out var failedAt) && DateTime.UtcNow - failedAt < RetryAfter) continue;
                 var error = await MergeAsync(family, ct);
-                if (error == null) { merged++; state.Remove(family.Fingerprint); }
+                if (error == null) { merged++; state.Remove(family.Fingerprint); Note($"merged {family.Base.Path}"); }
                 else
                 {
                     _logger.Warn($"[SwitchMerge] {Path.GetFileName(family.Base.Path)}: {error}");
+                    Note($"failed {family.Base.Path}: {error}");
                     LastError = error;
                     state[family.Fingerprint] = DateTime.UtcNow;
                 }
@@ -317,6 +318,13 @@ namespace RetroArr.Core.Games
         {
             try { return File.Exists(StatePath) ? JsonSerializer.Deserialize<Dictionary<string, DateTime>>(File.ReadAllText(StatePath)) ?? new() : new(); }
             catch (Exception) { return new(); }
+        }
+
+        // switch-merge.log in the config folder: every merge and why one failed, kept past container restarts
+        private void Note(string line)
+        {
+            try { File.AppendAllText(Path.Combine(_config.GetConfigDirectory(), "switch-merge.log"), $"{DateTime.UtcNow:o} {line}{Environment.NewLine}"); }
+            catch (Exception) { }
         }
 
         private void SaveState(Dictionary<string, DateTime> state)
