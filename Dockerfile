@@ -103,6 +103,10 @@ RUN apk add --no-cache git && mkdir -p /nscb && \
       # without the old str() it finds no content and writes an empty UNKNOWN.nsp
       && find /nscb -name '*.py' -exec sed -i 's/^from enum import IntEnum/from nscb_enum import IntEnum/' {} + \
       && printf 'from enum import IntEnum as _IntEnum\n\n\nclass IntEnum(_IntEnum):\n    def __str__(self):\n        return "%%s.%%s" %% (type(self).__name__, self.name)\n' > /nscb/lib/nscb_enum.py \
+      # After appending a .cnmt.xml it removes the output NSP instead of the xml; Windows refuses to delete the open file,
+      # Linux deletes it and the rest lands in a new file (only the last ticket and cert)
+      && sed -i '6655s/os.remove(outf)/os.remove(xmlfile)/' /nscb/Fs/Nsp.py \
+      && sed -n 6655p /nscb/Fs/Nsp.py | grep -q 'os.remove(xmlfile)' \
     ) || echo "[nscb] WARN: download failed at build time; Switch merging stays off until the image is rebuilt"
 
 FROM node:22 AS frontend

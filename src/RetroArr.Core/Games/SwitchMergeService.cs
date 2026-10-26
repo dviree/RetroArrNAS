@@ -325,7 +325,7 @@ namespace RetroArr.Core.Games
 
         private string? _lastOutput;
 
-        // switch-merge-output.log in the config folder: NSC_Builder's whole output of the last failed merge, without its
+        // switch-merge-output.log in the config folder: NSC_Builder's whole output of each failed merge, without its
         // progress bars, so an error printed early is not lost
         private void KeepOutput(string basePath)
         {
@@ -333,7 +333,7 @@ namespace RetroArr.Core.Games
             var lines = _lastOutput.Replace("\r\n", "\n").Split('\n')
                 .Select(l => l.Split('\r').LastOrDefault(p => p.Trim().Length > 0) ?? string.Empty)
                 .Where(l => l.Trim().Length > 0 && !Regex.IsMatch(l, @"\d+%\|"));
-            try { File.WriteAllText(Path.Combine(_config.GetConfigDirectory(), "switch-merge-output.log"), $"{DateTime.UtcNow:o} {basePath}{Environment.NewLine}{string.Join(Environment.NewLine, lines)}{Environment.NewLine}"); }
+            try { File.AppendAllText(Path.Combine(_config.GetConfigDirectory(), "switch-merge-output.log"), $"{DateTime.UtcNow:o} {basePath}{Environment.NewLine}{string.Join(Environment.NewLine, lines)}{Environment.NewLine}"); }
             catch (Exception) { }
             _lastOutput = null;
         }
