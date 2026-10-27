@@ -17,6 +17,54 @@
 
 Think Radarr/Sonarr, but for video games. RetroArr scans your library, fetches metadata, organizes files, searches indexers, and automates downloads across PC, retro consoles, handhelds, and arcade platforms. One tool, one UI.
 
+## NAS edition (this fork)
+
+This fork adds what a download-and-sort pipeline on a NAS needs, so no scripts run beside RetroArr. Everything below runs inside the container; nothing that moves or removes files does so before the copy it depends on is verified, and anything removed goes to RetroArr's trash first.
+
+**Import from download folders**
+- Watch folders (JDownloader, qBittorrent, others): a release is compared with the library, what is missing is copied in, and the source goes to the trash only when every file is verified in the library. JDownloader's `extracted` folder is looked into: each release in it is its own download
+- qBittorrent folders are never changed: the library gets a reflink copy (hardlink when the volumes allow), so seeding goes on
+- ZIP/RAR/7z, multi-volume too; only the first volume is unpacked, free space is checked first, nothing is unpacked again when the game is in the library already
+- Names come from the AI first (`OPENAI_API_KEY`), then IGDB; release-named entries ("Game.PS5-GROUP") are renamed and get metadata every hour
+- PC releases (SteamRIP, FitGirl, …) go to `pc`, never to a store folder
+- Missing library entries are relinked every hour when their files moved (a merge, a rename, another platform folder)
+
+**PlayStation 4 / 5**
+- The title ID decides the console (PPSA/ECAS → PS5, CUSA → PS4); names from `param.json`/`param.sfo`: `Title [PPSA01234] [v1.2]`
+- PS5: images (`.exfat`, `.ffpfsc`), game folders and LZ4 folders in `ps5/`; fake PKGs in `ps5/pkg/`; DLC PKGs in `ps5/pkg/<Game> [DLC]/`. A higher version replaces a lower one in the same format; PKGs are kept beside any other format; LZ4 folders are never replaced
+- PS4: every PKG of a game (base, updates, DLC) in one folder, `ps4/<Game> [CUSA01234]/` or the folder that holds the game already
+- Backports (PKGs patched for older firmware) are kept apart in `PS_BACKPORT_FOLDER`, one folder per release, known by name or by their `fakelib` folder; never imported as the game
+- Folders named only by a title ID ("PPSA01234-app0-lz4") get the game's name every hour, LZ4 libraries (`PS_LIBRARY_EXTRA`) too, renamed in place; every rename is logged to `ps-renames.json`
+- A PS game's file list shows its other copies (its PKG, an image)
+
+**Nintendo Switch**
+- Base + newest update + every DLC become one NSP, with [nscb_rust](https://github.com/cxfcxf/nscb_rust) (NSP/NSZ/XCI/XCZ in). nscb_rust has no licence, so the image does not ship it: the container fetches the author's release once, checked by its SHA-256. The merged NSP is verified (`lv3`: decryption, signatures, hashes) before it replaces the parts, which go to the trash. Results in `switch-merge.log`
+- Every file in the Switch library is verified once with `lv3`, again when it changes; broken files are listed in `switch-verify.log`. Nothing is moved
+- Title IDs are read from the NSP's ticket when a file name lacks them
+
+**BIOS / firmware** (off by default)
+- `BIOS_SORT=dryrun` lists in `bios-sort-plan.log` what it would do and changes nothing; `BIOS_SORT=true` sorts loose files and archives dropped into the BIOS folder into a folder per platform. Folders in the BIOS folder are never touched
+
+**NAS environment**
+
+| Variable | Default | |
+|---|---|---|
+| `OPENAI_API_KEY`, `OPENAI_MODEL`, `AI_MIN_CONFIDENCE` | off, -, 0.70 | AI naming before IGDB |
+| `HARDLINK_ROOT` | - | A mount of the whole volume, for hardlinks/reflinks across shares |
+| `PS_IMPORT_FOLDERS` | `true` | Import PS game folders (else they are left for a converter) |
+| `PS_PKG_FOLDER` | `pkg` | PS5 PKG folder under `ps5/` |
+| `PS_LIBRARY_EXTRA` | - | Other PS libraries (an LZ4 test library): only renamed, never filled |
+| `PS_BACKPORT_FOLDER` | `/nas/games/backport ps5` | Where backports are kept |
+| `PS_RENAME` | `true` | Rename title-ID-only PS folders |
+| `PS_HOLD_FILE` | - | A file that pauses PS imports while it exists |
+| `SWITCH_KEYS_FILE` | `/app/config/switch/prod.keys` | Your own keys; merging is off without them |
+| `SWITCH_NSCB_RUST`, `SWITCH_NSCB_RUST_URL` | `/app/config/switch/nscb_rust`, pinned release | The merger and where it is fetched from |
+| `SWITCH_MERGE_MINUTES` | `30` | How often merges and checks run |
+| `SWITCH_WORK` | `/temp/retroarr-switch` | Work folder for merges |
+| `BIOS_SORT`, `BIOS_SORT_FOLDER` | off, `/nas/games/bios` | `dryrun` or `true` |
+
+The image is built by `.github/workflows/nas-image.yml`, which also merges upstream changes, and is meant to be pulled by Watchtower.
+
 ## Quick Start
 
 ```yaml
