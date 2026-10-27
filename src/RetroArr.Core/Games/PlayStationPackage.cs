@@ -68,7 +68,7 @@ namespace RetroArr.Core.Games
             if (File.Exists(path)) return ForFile(path, idFromName);
             if (!Directory.Exists(path)) return new(PlayStationFormat.Unknown, NullIfEmpty(idFromName), null, null, null);
 
-            // GameSauce's rule: an LZ4 name anywhere in the folder means the folder is compressed
+            // An LZ4 name anywhere in the folder means the folder is compressed
             if (Path.GetFileName(path).Contains("lz4", StringComparison.OrdinalIgnoreCase) || HasLz4Marker(path))
             {
                 var root = FindGameRoot(path);

@@ -263,7 +263,7 @@ namespace RetroArr.Host
             // Post-Download Management
             builder.Services.AddSingleton(new RetroArr.Core.Download.DownloadPlatformTracker(configService.GetConfigDirectory()));
             builder.Services.AddSingleton(new RetroArr.Core.Download.TrackedDownloads.TrackedDownloadService(configService.GetConfigDirectory()));
-            // GameSauce's AI naming, on when OPENAI_API_KEY is set
+            // AI naming, on when OPENAI_API_KEY is set
             builder.Services.AddSingleton(sp => new RetroArr.Core.MetadataSource.AiTitleService(
                 sp.GetRequiredService<System.Net.Http.IHttpClientFactory>().CreateClient("openai")));
             builder.Services.AddSingleton<RetroArr.Core.Download.PostDownloadProcessor>();

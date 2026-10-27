@@ -13,8 +13,8 @@ using RetroArr.Core.Games;
 namespace RetroArr.Core.MetadataSource
 {
     /// <summary>
-    /// Asks an OpenAI model which game and platform a release is, from its name and the files in it, the way GameSauce
-    /// did. Not an authoritative source: a title IGDB verifies always wins over the model's. Off unless OPENAI_API_KEY is set;
+    /// Asks an OpenAI model which game and platform a release is, from its name and the files in it.
+    /// Not an authoritative source: a title IGDB verifies always wins over the model's. Off unless OPENAI_API_KEY is set;
     /// OPENAI_MODEL picks the model, AI_MIN_CONFIDENCE (default 0.70) how sure it has to be. Each release is asked once.
     /// </summary>
     [SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes")]

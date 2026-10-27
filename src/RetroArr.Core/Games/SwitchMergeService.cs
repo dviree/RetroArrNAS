@@ -15,7 +15,7 @@ namespace RetroArr.Core.Games
 {
     /// <summary>
     /// Merges a Switch game's base, latest update and DLC in the library into one NSP with NSC_Builder (bundled in the
-    /// image at /opt/nscb), the way GameSauce's switch merger and the old host worker did. The merged file is verified
+    /// image at /opt/nscb). The merged file is verified
     /// (lv3: decryption, signatures and hashes) before it is published next to the base; only then do the parts go to
     /// the trash. Off until a keys file is there (SWITCH_KEYS_FILE, default /app/config/switch/prod.keys).
     /// </summary>
@@ -47,7 +47,7 @@ namespace RetroArr.Core.Games
         private readonly IGameRepository? _games;
 
         internal string Nscb = Environment.GetEnvironmentVariable("SWITCH_NSCB") ?? "/opt/nscb/squirrel.py";
-        // nscb_rust (github.com/cxfcxf/nscb_rust), the merger GameSauce used: preferred when it is there. It carries no
+        // nscb_rust (github.com/cxfcxf/nscb_rust), preferred when it is there. It carries no
         // licence, so the image does not ship it; the NAS fetches the author's own release once, checked by its hash.
         internal string NscbRust = Environment.GetEnvironmentVariable("SWITCH_NSCB_RUST") ?? "/app/config/switch/nscb_rust";
         internal string? NscbRustUrl = Environment.GetEnvironmentVariable("SWITCH_NSCB_RUST_URL") ?? RustRelease;

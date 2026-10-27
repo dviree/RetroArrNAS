@@ -188,7 +188,7 @@ namespace RetroArr.Core.Test.Download
         [Test]
         public async Task HiddenWorkFoldersAndEmptyFolders_AreSkipped()
         {
-            Write(".gamesauce-work/job/game.wbfs");
+            Write(".tool-work/job/game.wbfs");
             Directory.CreateDirectory(Path.Combine(_root, "Empty"));
             Assert.That(await List(), Is.Empty);
         }

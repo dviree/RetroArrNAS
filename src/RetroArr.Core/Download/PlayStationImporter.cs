@@ -116,7 +116,7 @@ namespace RetroArr.Core.Download
             string.Equals(platformFolder, "ps5", StringComparison.OrdinalIgnoreCase) || string.Equals(platformFolder, "ps4", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>Backports (PKGs patched for older PS5 firmware) are kept apart, in PS_BACKPORT_FOLDER (default
-        /// /nas/games/backport ps5 = /volume1/games/backport ps5), one folder per release.</summary>
+        /// /nas/games/backport ps5), one folder per release.</summary>
         internal string BackportRoot = Environment.GetEnvironmentVariable("PS_BACKPORT_FOLDER") ?? "/nas/games/backport ps5";
 
         internal static bool IsBackport(string name) => name.Contains("backport", StringComparison.OrdinalIgnoreCase);

@@ -13,12 +13,12 @@ using RetroArr.Core.IO;
 namespace RetroArr.Core.Games
 {
     /// <summary>
-    /// GameSauce's BIOS/firmware sorter: what is dropped into the BIOS folder (files, folders, ZIP/7z/RAR) is sorted into
+    /// BIOS/firmware sorter: what is dropped into the BIOS folder (files, folders, ZIP/7z/RAR) is sorted into
     /// a folder per platform ("psx/scph5501.bin", "switch/keys/prod.keys", "switch/firmware/..."), by the known BIOS
     /// file names and the platform words in the name or the folder it came in. What cannot be placed goes to
     /// "unsorted". The platform folders themselves are never sorted again. Nothing is deleted: an exact duplicate, a
     /// smaller file of the same name, an unpacked archive and junk (images, .nfo, .url) go to the trash.
-    /// BIOS_SORT_FOLDER picks the folder (default /nas/games/bios = /volume1/games/bios); BIOS_SORT=true turns it on.
+    /// BIOS_SORT_FOLDER picks the folder (default /nas/games/bios); BIOS_SORT=true turns it on.
     /// Folders in the BIOS folder are never touched, only loose files and archives.
     /// </summary>
     [SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes")]
@@ -76,7 +76,7 @@ namespace RetroArr.Core.Games
             }
         }
 
-        // The platform folders (RomM's names, as GameSauce used them)
+        // The platform folders (RomM's names)
         internal static readonly HashSet<string> Platforms = new(StringComparer.OrdinalIgnoreCase)
         {
             "psx", "ps2", "ps3", "psp", "dc", "saturn", "segacd", "sega32", "gba", "nds", "3ds", "switch", "ngc", "wii", "wiiu",
