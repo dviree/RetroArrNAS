@@ -32,7 +32,7 @@ namespace RetroArr.Core.Download
         // AlreadyInLibrary: the game is in roms in some form, nothing was added; a watch folder in move mode lets the
         // release go to the trash
         public sealed record Outcome(bool Success, string? Destination, string? Reason, string? Title = null, string? VerifyFrom = null, bool Unpacked = false,
-            bool AlreadyInLibrary = false)
+            bool AlreadyInLibrary = false, bool Backport = false)
         {
             public static Outcome Fail(string reason) => new(false, null, reason);
         }
@@ -115,8 +115,49 @@ namespace RetroArr.Core.Download
         public static bool IsPlayStation(string? platformFolder) =>
             string.Equals(platformFolder, "ps5", StringComparison.OrdinalIgnoreCase) || string.Equals(platformFolder, "ps4", StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>Backports (PKGs patched for older PS5 firmware) are kept apart, in PS_BACKPORT_FOLDER (default
+        /// /nas/games/backport ps5 = /volume1/games/backport ps5), one folder per release.</summary>
+        internal string BackportRoot = Environment.GetEnvironmentVariable("PS_BACKPORT_FOLDER") ?? "/nas/games/backport ps5";
+
+        internal static bool IsBackport(string name) => name.Contains("backport", StringComparison.OrdinalIgnoreCase);
+
+        // The backports in a release (the release itself, or its "Backport 4.xx" folders and files) copied into
+        // BackportRoot/<release>. Returns what was saved, or an error.
+        private (List<string> Saved, string? Error) SaveBackports(string source, string releaseName)
+        {
+            var saved = new List<string>();
+            var target = Path.Combine(BackportRoot, SafeTitle(releaseName) is { Length: > 0 } t ? t : "Backport");
+            IEnumerable<string> items;
+            if (IsBackport(Path.GetFileName(source)) || IsBackport(releaseName)) items = new[] { source };
+            else if (Directory.Exists(source))
+            {
+                var all = Directory.EnumerateFileSystemEntries(source, "*", SearchOption.AllDirectories).Where(e => IsBackport(Path.GetFileName(e))).ToList();
+                // The outermost only: a "Backport 4.xx" folder, not each file in it again
+                items = all.Where(e => !all.Any(o => o != e && e.StartsWith(o + Path.DirectorySeparatorChar, StringComparison.Ordinal))).ToList();
+            }
+            else items = Array.Empty<string>();
+            foreach (var item in items)
+            {
+                var folder = Directory.Exists(item);
+                // A loose backport file goes into its release's folder too: BackportRoot/<release>/<file>
+                var to = item == source ? (folder ? target : Path.Combine(target, Path.GetFileName(item))) : Path.Combine(target, Path.GetRelativePath(source, item));
+                if (SizeOf(to) == SizeOf(item)) { saved.Add(to); continue; }
+                Directory.CreateDirectory(folder ? to : Path.GetDirectoryName(to)!);
+                var error = folder ? CopyFolder(item, to) : CopyFile(item, to);
+                if (error != null) return (saved, error);
+                _logger.Info($"[PlayStation] Backport {item} kept in {to}");
+                saved.Add(to);
+            }
+            return (saved, null);
+        }
+
         public Task<Outcome> ImportAsync(string source, string releaseName, string libraryRoot, string platformFolder)
         {
+            var (backports, backportError) = SaveBackports(source, releaseName);
+            if (backportError != null) return Task.FromResult(Outcome.Fail(backportError));
+            // A release that is only a backport is done once it is kept
+            if (backports.Count > 0 && (IsBackport(Path.GetFileName(source)) || IsBackport(releaseName)))
+                return Task.FromResult(new Outcome(true, backports[0], null, releaseName, VerifyFrom: source, Backport: true));
             var package = PlayStationPackageInspector.Inspect(source);
             if (package.Format == PlayStationFormat.Archive)
             {
@@ -164,7 +205,9 @@ namespace RetroArr.Core.Download
                         return Outcome.Fail($"Could not unpack {Path.GetFileName(firsts[i])} (damaged, incomplete or password protected)");
                 }
 
-                var found = Importables(work).ToList();
+                var (_, unpackedBackportError) = SaveBackports(work, releaseName);
+                if (unpackedBackportError != null) return Outcome.Fail(unpackedBackportError);
+                var found = Importables(work).Where(f => !Path.GetRelativePath(work, f).Split(Path.DirectorySeparatorChar).Any(IsBackport)).ToList();
                 if (found.Count == 0) return Outcome.Fail("The archive holds no PlayStation game, image or package");
                 Outcome? first = null;
                 foreach (var item in found)
@@ -217,7 +260,8 @@ namespace RetroArr.Core.Download
             if (!isFolderGame && Directory.Exists(source))
             {
                 var ext = Path.GetExtension(from);
-                var images = Directory.EnumerateFiles(source, "*" + ext, SearchOption.AllDirectories).Count();
+                var images = Directory.EnumerateFiles(source, "*" + ext, SearchOption.AllDirectories)
+                    .Count(f => !Path.GetRelativePath(source, f).Split(Path.DirectorySeparatorChar).Any(IsBackport));
                 if (images > 1) return Outcome.Fail($"{images} {ext} files in one folder: add the folder as a recursive watch so each is its own game");
             }
 

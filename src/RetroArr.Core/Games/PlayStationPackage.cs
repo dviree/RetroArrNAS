@@ -86,6 +86,9 @@ namespace RetroArr.Core.Games
             // A folder holding an image, a package or an archive is that
             var files = Directory.EnumerateFiles(path, "*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, MaxRecursionDepth = 3 })
                 .Take(2000).ToList();
+            // A backport (a PKG patched for older firmware, "Backport 4.xx/...") is kept apart, never the game itself
+            var outside = files.Where(f => !Path.GetRelativePath(path, f).Split(Path.DirectorySeparatorChar).Any(p => p.Contains("backport", StringComparison.OrdinalIgnoreCase))).ToList();
+            if (outside.Count > 0) files = outside;
             foreach (var format in new[] { PlayStationFormat.FfpfscImage, PlayStationFormat.ExfatImage, PlayStationFormat.Pkg, PlayStationFormat.Archive })
             {
                 // An archive set is read through its first volume

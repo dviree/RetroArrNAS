@@ -31,6 +31,7 @@ namespace RetroArr.Core.Test.Download
             media.TrashPath = Path.Combine(_root, "bin");
             config.SaveMediaSettings(media);
             _importer = new PlayStationImporter(new FileMoverService(), null, new TrashService(config), new ArchiveService(), Path.Combine(_root, "temp"));
+            _importer.BackportRoot = Path.Combine(_root, "backport ps5");
         }
 
         [TearDown]
@@ -390,6 +391,35 @@ namespace RetroArr.Core.Test.Download
             Assert.That(result.Success, Is.True, result.Reason);
             Assert.That(Path.GetDirectoryName(result.Destination), Is.EqualTo(game));
             Assert.That(Directory.EnumerateFiles(ps4), Is.Empty);
+        }
+
+        [Test]
+        public async Task ABackportInARelease_IsKeptInTheBackportFolder_TheGameIsImported()
+        {
+            var release = Directory.CreateDirectory(Path.Combine(_inbox, "Onimusha Way of the Sword PPSA27836")).FullName;
+            File.WriteAllText(Path.Combine(release, "EP0102-PPSA27836_00-ONIMUSHAWAYSWORD.pkg"), "game");
+            var backport = Directory.CreateDirectory(Path.Combine(release, "Backport 4.xx")).FullName;
+            File.WriteAllText(Path.Combine(backport, "fix.pkg"), "patched");
+
+            var result = await _importer.ImportAsync(release, Path.GetFileName(release), _library, "ps5");
+
+            Assert.That(result.Success, Is.True, result.Reason);
+            Assert.That(result.Backport, Is.False);
+            Assert.That(File.ReadAllText(Path.Combine(_root, "backport ps5", "Onimusha Way of the Sword PPSA27836", "Backport 4.xx", "fix.pkg")), Is.EqualTo("patched"));
+            Assert.That(File.Exists(Path.Combine(release, "Backport 4.xx", "fix.pkg")), Is.True, "only copied; the source is retired by the caller");
+        }
+
+        [Test]
+        public async Task AReleaseThatIsOnlyABackport_GoesToTheBackportFolder_AndNotIntoTheLibrary()
+        {
+            var release = Directory.CreateDirectory(Path.Combine(_inbox, "Backport 4.xx PPSA27836")).FullName;
+            File.WriteAllText(Path.Combine(release, "fix.pkg"), "patched");
+
+            var result = await _importer.ImportAsync(release, Path.GetFileName(release), _library, "ps5");
+
+            Assert.That((result.Success, result.Backport), Is.EqualTo((true, true)), result.Reason);
+            Assert.That(File.Exists(Path.Combine(_root, "backport ps5", "Backport 4.xx PPSA27836", "fix.pkg")), Is.True);
+            Assert.That(Directory.Exists(Path.Combine(_library, "ps5")) && Directory.EnumerateFileSystemEntries(Path.Combine(_library, "ps5"), "*", SearchOption.AllDirectories).Any(), Is.False);
         }
     }
 }
