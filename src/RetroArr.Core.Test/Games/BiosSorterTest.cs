@@ -66,18 +66,22 @@ namespace RetroArr.Core.Test.Games
         }
 
         [Test]
-        public async Task LooseFilesAndFolders_AreSorted_JunkGoesToTheTrash()
+        public async Task LooseFiles_AreSorted_FoldersAreNeverTouched()
         {
             Drop("scph5501.bin");
             Drop("prod.keys", "keys");
             Drop("Sega Saturn BIOS/sega_101.bin", "saturn");
-            Drop("Sega Saturn BIOS/readme.nfo", "junk");
+            Drop("86Box/roms/machines/ibmpc/BIOS.ROM", "86box");
+            Drop("readme.nfo", "junk");
             Drop("mystery.bin", "?");
 
-            Assert.That(await _sorter.RunOnceAsync(), Is.EqualTo(4));
+            Assert.That(await _sorter.RunOnceAsync(), Is.EqualTo(3));
 
-            Assert.That(Sorted(), Is.EqualTo(new[] { "psx/scph5501.bin", "saturn/sega_101.bin", "switch/keys/prod.keys", "unsorted/mystery.bin" }));
-            Assert.That(_trash.List(), Has.Count.EqualTo(2), "the .nfo and the emptied folder");
+            Assert.That(Sorted(), Is.EqualTo(new[]
+            {
+                "86Box/roms/machines/ibmpc/BIOS.ROM", "Sega Saturn BIOS/sega_101.bin", "psx/scph5501.bin", "switch/keys/prod.keys", "unsorted/mystery.bin"
+            }), "folders stay exactly as they are");
+            Assert.That(_trash.List(), Has.Count.EqualTo(1), "only the .nfo");
         }
 
         [Test]

@@ -18,7 +18,8 @@ namespace RetroArr.Core.Games
     /// file names and the platform words in the name or the folder it came in. What cannot be placed goes to
     /// "unsorted". The platform folders themselves are never sorted again. Nothing is deleted: an exact duplicate, a
     /// smaller file of the same name, an unpacked archive and junk (images, .nfo, .url) go to the trash.
-    /// BIOS_SORT_FOLDER picks the folder (default /nas/games/bios = /volume1/games/bios); BIOS_SORT=false turns it off.
+    /// BIOS_SORT_FOLDER picks the folder (default /nas/games/bios = /volume1/games/bios); BIOS_SORT=true turns it on.
+    /// Folders in the BIOS folder are never touched, only loose files and archives.
     /// </summary>
     [SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes")]
     public class BiosSorter : BackgroundService
@@ -38,8 +39,9 @@ namespace RetroArr.Core.Games
             _archives = archives;
         }
 
+        // Off unless BIOS_SORT=true: on its first run it took the owner's own folders (86Box, systemroms ...) apart
         public static bool Enabled =>
-            !string.Equals(Environment.GetEnvironmentVariable("BIOS_SORT"), "false", StringComparison.OrdinalIgnoreCase);
+            string.Equals(Environment.GetEnvironmentVariable("BIOS_SORT"), "true", StringComparison.OrdinalIgnoreCase);
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
@@ -177,6 +179,9 @@ namespace RetroArr.Core.Games
                 ct.ThrowIfCancellationRequested();
                 var name = Path.GetFileName(entry);
                 if (name.StartsWith('.') || Platforms.Contains(name) || name.Equals(Unsorted, StringComparison.OrdinalIgnoreCase)) continue;
+                // Folders are the owner's: an emulator's own layout (86Box/roms/..., MAME sets) must stay as it is.
+                // Only loose files and archives dropped straight into the BIOS folder are sorted.
+                if (Directory.Exists(entry)) continue;
                 if (!Settled(entry)) continue;
                 try { placed += await SortAsync(entry, name, ct); }
                 catch (Exception ex) when (ex is not OperationCanceledException) { _logger.Warn($"[BIOS] Could not sort {entry}: {ex.Message}"); }
