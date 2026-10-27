@@ -137,5 +137,26 @@ namespace RetroArr.Core.Test.Games
             Assert.That(Directory.EnumerateFiles(Path.Combine(_bios, "switch", "firmware", "Firmware 19.0.1")).Count(), Is.EqualTo(12));
             Assert.That(File.Exists(zip), Is.False);
         }
+
+        [Test]
+        public async Task DryRun_ChangesNothing_AndListsWhatItWouldDo()
+        {
+            _sorter.DryRun = true;
+            Drop("scph5501.bin");
+            Drop("readme.nfo", "junk");
+            var zip = Path.Combine(_bios, "Dreamcast BIOS.zip");
+            using (var archive = ZipFile.Open(zip, ZipArchiveMode.Create))
+                using (var w = new StreamWriter(archive.CreateEntry("dc_boot.bin").Open())) w.Write("boot");
+            var before = Sorted();
+
+            await _sorter.RunOnceAsync();
+
+            Assert.That(Sorted(), Is.EqualTo(before), "nothing moved, unpacked or trashed");
+            Assert.That(Directory.EnumerateDirectories(_bios), Is.Empty, "not even a folder made");
+            Assert.That(_trash.List(), Is.Empty);
+            Assert.That(_sorter.Plan, Has.Some.StartsWith("MOVE").And.Contains("psx"));
+            Assert.That(_sorter.Plan, Has.Some.StartsWith("TRASH").And.EndsWith("readme.nfo"));
+            Assert.That(_sorter.Plan, Has.Some.StartsWith("UNPACK"));
+        }
     }
 }

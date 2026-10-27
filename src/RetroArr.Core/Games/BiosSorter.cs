@@ -33,15 +33,35 @@ namespace RetroArr.Core.Games
         internal TimeSpan SettleTime = TimeSpan.FromSeconds(60);
         internal TimeSpan Interval = TimeSpan.FromMinutes(5);
 
-        public BiosSorter(TrashService trash, IArchiveService archives)
+        private readonly ConfigurationService? _config;
+
+        public BiosSorter(TrashService trash, IArchiveService archives, ConfigurationService? config = null)
         {
             _trash = trash;
             _archives = archives;
+            _config = config;
         }
+
+        // BIOS_SORT=dryrun: nothing is moved, unpacked or trashed; what would happen goes to bios-sort-plan.log
+        internal bool DryRun = string.Equals(Environment.GetEnvironmentVariable("BIOS_SORT"), "dryrun", StringComparison.OrdinalIgnoreCase);
+        internal readonly List<string> Plan = new();
 
         // Off unless BIOS_SORT=true: on its first run it took the owner's own folders (86Box, systemroms ...) apart
         public static bool Enabled =>
-            string.Equals(Environment.GetEnvironmentVariable("BIOS_SORT"), "true", StringComparison.OrdinalIgnoreCase);
+            Environment.GetEnvironmentVariable("BIOS_SORT") is { } v && (v.Equals("true", StringComparison.OrdinalIgnoreCase) || v.Equals("dryrun", StringComparison.OrdinalIgnoreCase));
+
+        private async Task<bool> TrashAsync(string path)
+        {
+            if (DryRun) { Plan.Add($"TRASH  {path}"); return true; }
+            return await _trash.MoveAsync(path, null, "BIOS") != null;
+        }
+
+        private void Move(string from, string to)
+        {
+            if (DryRun) { Plan.Add($"MOVE   {from} -> {to}"); return; }
+            Directory.CreateDirectory(Path.GetDirectoryName(to)!);
+            File.Move(from, to);
+        }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
@@ -171,8 +191,8 @@ namespace RetroArr.Core.Games
         /// <summary>Sorts what lies loose in the BIOS folder. Returns how many files were placed.</summary>
         public async Task<int> RunOnceAsync(CancellationToken ct = default)
         {
+            Plan.Clear();
             if (!Directory.Exists(Root)) return 0;
-            Directory.CreateDirectory(Path.Combine(Root, Unsorted));
             var placed = 0;
             foreach (var entry in Directory.EnumerateFileSystemEntries(Root).ToList())
             {
@@ -186,6 +206,11 @@ namespace RetroArr.Core.Games
                 try { placed += await SortAsync(entry, name, ct); }
                 catch (Exception ex) when (ex is not OperationCanceledException) { _logger.Warn($"[BIOS] Could not sort {entry}: {ex.Message}"); }
             }
+            if (DryRun && _config != null)
+            {
+                try { File.WriteAllLines(Path.Combine(_config.GetConfigDirectory(), "bios-sort-plan.log"), new[] { $"{DateTime.UtcNow:o} dry run, nothing was changed" }.Concat(Plan)); }
+                catch (Exception ex) { _logger.Warn($"[BIOS] Could not write the plan: {ex.Message}"); }
+            }
             return placed;
         }
 
@@ -197,7 +222,7 @@ namespace RetroArr.Core.Games
                 foreach (var file in Directory.EnumerateFiles(entry, "*", SearchOption.AllDirectories).ToList())
                     placed += await SortFileAsync(file, Path.GetRelativePath(Root, Path.GetDirectoryName(file)!), ct);
                 // What is left is empty folders
-                if (!Directory.EnumerateFiles(entry, "*", SearchOption.AllDirectories).Any()) await _trash.MoveAsync(entry, null, "BIOS");
+                if (!Directory.EnumerateFiles(entry, "*", SearchOption.AllDirectories).Any()) await TrashAsync(entry);
                 return placed;
             }
             return await SortFileAsync(entry, null, ct);
@@ -206,7 +231,7 @@ namespace RetroArr.Core.Games
         private async Task<int> SortFileAsync(string file, string? cameIn, CancellationToken ct)
         {
             var name = Path.GetFileName(file);
-            if (Junk.Contains(Path.GetExtension(name))) { await _trash.MoveAsync(file, null, "BIOS"); return 0; }
+            if (Junk.Contains(Path.GetExtension(name))) { await TrashAsync(file); return 0; }
             if (_archives.IsArchive(file) && !Known.ContainsKey(name)) return await SortArchiveAsync(file, cameIn, ct);
             return await PlaceAsync(file, FolderFor(name, cameIn)) ? 1 : 0;
         }
@@ -215,6 +240,7 @@ namespace RetroArr.Core.Games
         // switch/firmware/<name>
         private async Task<int> SortArchiveAsync(string archive, string? cameIn, CancellationToken ct)
         {
+            if (DryRun) { Plan.Add($"UNPACK {archive} (its files are sorted, the archive goes to the trash)"); return 0; }
             var staging = Path.Combine(Root, ".retroarr-bios-" + Guid.NewGuid().ToString("N")[..8]);
             try
             {
@@ -242,7 +268,7 @@ namespace RetroArr.Core.Games
                 else
                     foreach (var file in files)
                         placed += await SortFileAsync(file, string.Join(' ', new[] { cameIn, stem }.Where(s => !string.IsNullOrEmpty(s))), ct);
-                foreach (var part in volumes.Append(archive).Distinct().Where(File.Exists)) await _trash.MoveAsync(part, null, "BIOS");
+                foreach (var part in volumes.Append(archive).Distinct().Where(File.Exists)) await TrashAsync(part);
                 return placed;
             }
             finally
@@ -256,15 +282,14 @@ namespace RetroArr.Core.Games
         private async Task<bool> PlaceAsync(string file, string folder)
         {
             var dir = Path.Combine(Root, folder.Replace('/', Path.DirectorySeparatorChar));
-            Directory.CreateDirectory(dir);
             var target = Path.Combine(dir, Path.GetFileName(file));
             var size = new FileInfo(file).Length;
             var hash = Hash(file);
-            var same = Directory.EnumerateFiles(dir).FirstOrDefault(f => new FileInfo(f).Length == size && Hash(f) == hash);
+            var same = !Directory.Exists(dir) ? null : Directory.EnumerateFiles(dir).FirstOrDefault(f => new FileInfo(f).Length == size && Hash(f) == hash);
             if (same != null)
             {
                 _logger.Info($"[BIOS] {Path.GetFileName(file)} is in {folder} already as {Path.GetFileName(same)}; to the trash");
-                await _trash.MoveAsync(file, null, "BIOS");
+                await TrashAsync(file);
                 return false;
             }
             if (File.Exists(target))
@@ -272,12 +297,12 @@ namespace RetroArr.Core.Games
                 if (new FileInfo(target).Length >= size)
                 {
                     _logger.Info($"[BIOS] {folder}/{Path.GetFileName(file)} is there and not smaller; the new one goes to the trash");
-                    await _trash.MoveAsync(file, null, "BIOS");
+                    await TrashAsync(file);
                     return false;
                 }
-                if (await _trash.MoveAsync(target, null, "BIOS") == null) return false;
+                if (!await TrashAsync(target)) return false;
             }
-            File.Move(file, target);
+            Move(file, target);
             _logger.Info($"[BIOS] {Path.GetFileName(file)} -> {folder}");
             return true;
         }
