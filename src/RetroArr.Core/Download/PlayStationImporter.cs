@@ -121,6 +121,22 @@ namespace RetroArr.Core.Download
 
         internal static bool IsBackport(string name) => name.Contains("backport", StringComparison.OrdinalIgnoreCase);
 
+        // A release that is a backport by what it holds, whatever its name ("[DLPSGAME]"): a fakelib folder (the
+        // libraries a backport brings for older firmware) and no game data, so a few GB at most. A whole game with a
+        // fakelib folder is the game itself.
+        internal static long BackportMaxSize = 5L * 1024 * 1024 * 1024;
+
+        internal static bool IsBackportContent(string path)
+        {
+            try
+            {
+                return Directory.Exists(path)
+                    && Directory.EnumerateDirectories(path, "fakelib", new EnumerationOptions { RecurseSubdirectories = true, MaxRecursionDepth = 3, MatchCasing = MatchCasing.CaseInsensitive, IgnoreInaccessible = true }).Any()
+                    && SizeOf(path) < BackportMaxSize;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+        }
+
         // The backports in a release (the release itself, or its "Backport 4.xx" folders and files) copied into
         // BackportRoot/<release>. Returns what was saved, or an error.
         private (List<string> Saved, string? Error) SaveBackports(string source, string releaseName)
@@ -128,7 +144,7 @@ namespace RetroArr.Core.Download
             var saved = new List<string>();
             var target = Path.Combine(BackportRoot, SafeTitle(releaseName) is { Length: > 0 } t ? t : "Backport");
             IEnumerable<string> items;
-            if (IsBackport(Path.GetFileName(source)) || IsBackport(releaseName)) items = new[] { source };
+            if (IsBackport(Path.GetFileName(source)) || IsBackport(releaseName) || IsBackportContent(source)) items = new[] { source };
             else if (Directory.Exists(source))
             {
                 var all = Directory.EnumerateFileSystemEntries(source, "*", SearchOption.AllDirectories).Where(e => IsBackport(Path.GetFileName(e))).ToList();
@@ -156,7 +172,7 @@ namespace RetroArr.Core.Download
             var (backports, backportError) = SaveBackports(source, releaseName);
             if (backportError != null) return Task.FromResult(Outcome.Fail(backportError));
             // A release that is only a backport is done once it is kept
-            if (backports.Count > 0 && (IsBackport(Path.GetFileName(source)) || IsBackport(releaseName)))
+            if (backports.Count > 0 && (IsBackport(Path.GetFileName(source)) || IsBackport(releaseName) || IsBackportContent(source)))
                 return Task.FromResult(new Outcome(true, backports[0], null, releaseName, VerifyFrom: source, Backport: true));
             var package = PlayStationPackageInspector.Inspect(source);
             if (package.Format == PlayStationFormat.Archive)
@@ -186,6 +202,11 @@ namespace RetroArr.Core.Download
                 ? Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories).ToList()
                 : new List<string> { source };
             var firsts = all.Where(f => ArchiveFile.IsMatch(f) && !LaterRarPart.IsMatch(f)).OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
+            // Backport archives were kept apart already (SaveBackports); they are not unpacked into the library
+            var backportArchives = firsts.Where(f => IsBackport(Path.GetFileName(f))).ToList();
+            firsts = firsts.Except(backportArchives).ToList();
+            if (firsts.Count == 0 && backportArchives.Count > 0)
+                return new Outcome(true, Path.Combine(BackportRoot, SafeTitle(releaseName)), null, releaseName, VerifyFrom: null, Unpacked: true, Backport: true);
             if (firsts.Count == 0) return Outcome.Fail("PlayStation archive: no first volume found");
 
             var needed = all.Where(f => ArchiveFile.IsMatch(f) || Regex.IsMatch(f, @"\.(r\d\d|\d{3})$", RegexOptions.IgnoreCase)).Sum(f => new FileInfo(f).Length);
@@ -207,7 +228,7 @@ namespace RetroArr.Core.Download
 
                 var (_, unpackedBackportError) = SaveBackports(work, releaseName);
                 if (unpackedBackportError != null) return Outcome.Fail(unpackedBackportError);
-                var found = Importables(work).Where(f => !Path.GetRelativePath(work, f).Split(Path.DirectorySeparatorChar).Any(IsBackport)).ToList();
+                var found = Importables(work).Where(f => !Path.GetRelativePath(work, f).Split(Path.DirectorySeparatorChar).Any(IsBackport) && !IsBackportContent(f)).ToList();
                 if (found.Count == 0) return Outcome.Fail("The archive holds no PlayStation game, image or package");
                 Outcome? first = null;
                 foreach (var item in found)

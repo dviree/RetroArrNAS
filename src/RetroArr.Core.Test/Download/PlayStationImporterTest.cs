@@ -421,5 +421,52 @@ namespace RetroArr.Core.Test.Download
             Assert.That(File.Exists(Path.Combine(_root, "backport ps5", "Backport 4.xx PPSA27836", "fix.pkg")), Is.True);
             Assert.That(Directory.Exists(Path.Combine(_library, "ps5")) && Directory.EnumerateFileSystemEntries(Path.Combine(_library, "ps5"), "*", SearchOption.AllDirectories).Any(), Is.False);
         }
+
+        [Test]
+        public async Task ABackportWithoutTheWordInItsName_IsKnownByItsFakelib()
+        {
+            var release = Directory.CreateDirectory(Path.Combine(_inbox, "261020 - Ghost of Yotei [PPSA26344] [v2.002.000] [DLPSGAME]")).FullName;
+            File.WriteAllText(Path.Combine(release, "eboot.bin"), "x");
+            Directory.CreateDirectory(Path.Combine(release, "sce_sys"));
+            File.WriteAllText(Path.Combine(Directory.CreateDirectory(Path.Combine(release, "fakelib")).FullName, "libc.prx"), "lib");
+
+            var result = await _importer.ImportAsync(release, Path.GetFileName(release), _library, "ps5");
+
+            Assert.That((result.Success, result.Backport), Is.EqualTo((true, true)), result.Reason);
+            Assert.That(File.Exists(Path.Combine(_root, "backport ps5", Path.GetFileName(release), "fakelib", "libc.prx")), Is.True);
+        }
+
+        [Test]
+        public void AWholeGameWithAFakelib_IsTheGame_NotABackport()
+        {
+            var game = Directory.CreateDirectory(Path.Combine(_inbox, "Big Game")).FullName;
+            Directory.CreateDirectory(Path.Combine(game, "fakelib"));
+            File.WriteAllText(Path.Combine(game, "data.bin"), new string('x', 100));
+            var max = PlayStationImporter.BackportMaxSize;
+            try
+            {
+                PlayStationImporter.BackportMaxSize = 50;
+                Assert.That(PlayStationImporter.IsBackportContent(game), Is.False);
+            }
+            finally { PlayStationImporter.BackportMaxSize = max; }
+        }
+
+        [Test]
+        public async Task AReleaseHoldingOnlyABackportZip_IsKept_AndNothingIsUnpackedIntoTheLibrary()
+        {
+            var release = Directory.CreateDirectory(Path.Combine(_inbox, "MOUSE PI For Hire BP 4.xx PPSA26578")).FullName;
+            var zip = Path.Combine(release, "FW_4_xx_standalone_PPSA26578_MOUSE_backport.zip");
+            using (var archive = System.IO.Compression.ZipFile.Open(zip, System.IO.Compression.ZipArchiveMode.Create))
+            {
+                using (var w = new StreamWriter(archive.CreateEntry("eboot.bin").Open())) w.Write("x");
+                using (var w = new StreamWriter(archive.CreateEntry("sce_sys/param.json").Open())) w.Write("{}");
+            }
+
+            var result = await _importer.ImportAsync(release, Path.GetFileName(release), _library, "ps5");
+
+            Assert.That((result.Success, result.Backport), Is.EqualTo((true, true)), result.Reason);
+            Assert.That(File.Exists(Path.Combine(_root, "backport ps5", Path.GetFileName(release), Path.GetFileName(zip))), Is.True);
+            Assert.That(Directory.Exists(Path.Combine(_library, "ps5")) && Directory.EnumerateFileSystemEntries(Path.Combine(_library, "ps5")).Any(), Is.False);
+        }
     }
 }
