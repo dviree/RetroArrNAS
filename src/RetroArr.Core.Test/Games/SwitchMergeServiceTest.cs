@@ -310,5 +310,13 @@ namespace RetroArr.Core.Test.Games
                 Is.EqualTo(new[] { "The Legend of Zelda Tears of the Kingdom [0100F2C0115B6000][v393216].nsp" }));
             Assert.That(Directory.Exists(_service.PartsFolder) ? Directory.EnumerateFileSystemEntries(_service.PartsFolder) : Array.Empty<string>(), Is.Empty);
         }
+
+        [TestCase("Tomodachi Life Living the Dream.nsp", 0x0100A6301214E000UL, 0, "Tomodachi Life Living the Dream [0100A6301214E000][v0].nsp")]
+        [TestCase("INAZUMA_ELEVEN_Victory_Road_Switch_NSP_Base_Game.nsp", 0x0100B36008F90000UL, 0, "INAZUMA ELEVEN Victory Road [0100B36008F90000][v0].nsp")]
+        [TestCase("Zelda [0100F2C0115B6000][v0].nsp", 0x0100F2C0115B6000UL, 0, "Zelda [0100F2C0115B6000][v0].nsp")]
+        public void SingleGames_GetTheirTitleIdAndVersionInTheName(string file, ulong id, int version, string expected)
+        {
+            Assert.That(SwitchMergeService.NameFor(new SwitchMergeService.Part("/x/" + file, id, version, 1)), Is.EqualTo(expected));
+        }
     }
 }

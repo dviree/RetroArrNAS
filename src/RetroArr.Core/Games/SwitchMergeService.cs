@@ -397,8 +397,10 @@ namespace RetroArr.Core.Games
                 foreach (var part in group)
                 {
                     var into = single ? library : PartsFolder;
-                    if (SamePath(Path.GetDirectoryName(part.Path)!, into)) continue;
-                    var to = Path.Combine(into, Path.GetFileName(part.Path));
+                    // A game in roms/switch carries its title ID and version in its name, like a merged one
+                    var name = single ? NameFor(part) : Path.GetFileName(part.Path);
+                    if (SamePath(Path.GetDirectoryName(part.Path)!, into) && name == Path.GetFileName(part.Path)) continue;
+                    var to = Path.Combine(into, name);
                     if (File.Exists(to)) { _logger.Warn($"[SwitchMerge] {to} is there already; {part.Path} stays where it is"); continue; }
                     try
                     {
@@ -414,6 +416,21 @@ namespace RetroArr.Core.Games
             }
             foreach (var root in new[] { library, PartsFolder })
                 RemoveEmptyFolders(moved.Where(d => d.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal)), root);
+        }
+
+        // "Tomodachi Life Living the Dream.nsp" -> "Tomodachi Life Living the Dream [0100...0000][v0].nsp"; a name that
+        // has its title ID already stays as it is
+        internal static string NameFor(Part part)
+        {
+            var name = Path.GetFileName(part.Path);
+            if (TitleIdRegex.IsMatch(name)) return name;
+            var stem = Path.GetFileNameWithoutExtension(name).Replace('_', ' ');
+            stem = Regex.Replace(stem, @"[\[\(][^\]\)]*[\]\)]", " ");
+            stem = Regex.Replace(stem, @"(?i)\b(switch|nsp|xci|nsz|xcz|base game|update|v\d+(\.\d+)*)\b", " ");
+            stem = Regex.Replace(stem, @"[:/\\?*""<>|]", " ");
+            stem = Regex.Replace(stem, @"\s+", " ").Trim(' ', '.', '-');
+            if (stem.Length == 0) stem = "Switch Game";
+            return $"{stem} [{part.TitleId:X16}][v{part.Version}]{Path.GetExtension(name).ToLowerInvariant()}";
         }
 
         // Within a volume a rename; roms and the parts folder may be different mounts of it, so through the shared
