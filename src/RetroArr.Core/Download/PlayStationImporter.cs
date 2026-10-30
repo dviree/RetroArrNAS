@@ -65,8 +65,19 @@ namespace RetroArr.Core.Download
         /// <summary>The subfolder of roms/ps5 that fake PKGs go to, PS_PKG_FOLDER, default "pkg". PS4 has none.</summary>
         public static string PkgFolder => Environment.GetEnvironmentVariable("PS_PKG_FOLDER") is { Length: > 0 } f ? f : "pkg";
 
-        /// <summary>PS5 DLC PKGs go into roms/ps5/pkg/&lt;Game&gt; [DLC]/, one folder per game.</summary>
-        internal static string DlcGameFolder(string gameTitle) => SafeTitle(gameTitle) + " [DLC]";
+        /// <summary>
+        /// PS5 updates, DLC and backports share one folder outside the library, PS_BACKPORT_FOLDER (default
+        /// /nas/games/backport-updates-dlc): update and DLC PKGs right in it, backports in a folder per release.
+        /// </summary>
+        internal static string DefaultExtrasRoot => Environment.GetEnvironmentVariable("PS_BACKPORT_FOLDER") ?? "/nas/games/backport-updates-dlc";
+
+        /// <summary>An update or DLC PKG, by its name ("[Update]", "[DLC ...]") or else by the package itself.</summary>
+        internal static bool IsUpdateOrDlcPkg(string pkg)
+        {
+            var name = Path.GetFileName(pkg);
+            if (Regex.IsMatch(name, @"\[(Update|DLC)\b", RegexOptions.IgnoreCase)) return true;
+            return PlayStationPackageInspector.Inspect(pkg).Content is PlayStationContent.Update or PlayStationContent.Dlc;
+        }
 
         /// <summary>
         /// The folder in roms/ps4 that holds every PKG of a PS4 game (base, updates, DLC): one whose name carries the
@@ -115,9 +126,8 @@ namespace RetroArr.Core.Download
         public static bool IsPlayStation(string? platformFolder) =>
             string.Equals(platformFolder, "ps5", StringComparison.OrdinalIgnoreCase) || string.Equals(platformFolder, "ps4", StringComparison.OrdinalIgnoreCase);
 
-        /// <summary>Backports (PKGs patched for older PS5 firmware) are kept apart, in PS_BACKPORT_FOLDER (default
-        /// /nas/games/backport ps5), one folder per release.</summary>
-        internal string BackportRoot = Environment.GetEnvironmentVariable("PS_BACKPORT_FOLDER") ?? "/nas/games/backport ps5";
+        /// <summary>Backports (PKGs patched for older PS5 firmware) are kept apart there too, one folder per release.</summary>
+        internal string BackportRoot = DefaultExtrasRoot;
 
         internal static bool IsBackport(string name) => name.Contains("backport", StringComparison.OrdinalIgnoreCase);
 
@@ -291,12 +301,9 @@ namespace RetroArr.Core.Download
             var folder = package.Format == PlayStationFormat.Pkg && IsPs5(platformFolder) ? Path.Combine(platformPath, PkgFolder) : platformPath;
             Directory.CreateDirectory(platformPath);
             var title = await TitleForAsync(package, source, releaseName, from, platformPath);
-            // A PS5 DLC goes with the other DLC of its game: roms/ps5/pkg/<Game> [DLC]/
-            if (package.Format == PlayStationFormat.Pkg && IsPs5(platformFolder) && package.Content == PlayStationContent.Dlc)
-            {
-                var game = (package.TitleId != null ? GameTitleIn(package.TitleId, platformPath, folder) : null) ?? title;
-                folder = Path.Combine(folder, DlcGameFolder(game));
-            }
+            // A PS5 update or DLC goes with the backports, outside the library
+            if (package.Format == PlayStationFormat.Pkg && IsPs5(platformFolder) && package.Content is PlayStationContent.Update or PlayStationContent.Dlc)
+                folder = BackportRoot;
             // A PS4 PKG goes into its game's folder, with the game's other PKGs: roms/ps4/<Game> [CUSA01234]/
             var ps4Pkg = package.Format == PlayStationFormat.Pkg && !IsPs5(platformFolder) && package.TitleId != null;
             if (ps4Pkg)

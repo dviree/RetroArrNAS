@@ -31,7 +31,7 @@ This fork adds what a download-and-sort pipeline on a NAS needs, so no scripts r
 
 **PlayStation 4 / 5**
 - The title ID decides the console (PPSA/ECAS → PS5, CUSA → PS4); names from `param.json`/`param.sfo`: `Title [PPSA01234] [v1.2]`
-- PS5: images (`.exfat`, `.ffpfsc`), game folders and LZ4 folders in `ps5/`; fake PKGs in `ps5/pkg/`; DLC PKGs in `ps5/pkg/<Game> [DLC]/`. A higher version replaces a lower one in the same format; PKGs are kept beside any other format; LZ4 folders are never replaced
+- PS5: images (`.exfat`, `.ffpfsc`), game folders and LZ4 folders in `ps5/`; game PKGs in `ps5/pkg/`; update and DLC PKGs, with the backports, in `PS_BACKPORT_FOLDER`, outside the library. A higher version replaces a lower one in the same format; PKGs are kept beside any other format; LZ4 folders are never replaced
 - PS4: every PKG of a game (base, updates, DLC) in one folder, `ps4/<Game> [CUSA01234]/` or the folder that holds the game already
 - Backports (PKGs patched for older firmware) are kept apart in `PS_BACKPORT_FOLDER`, one folder per release, known by name or by their `fakelib` folder; never imported as the game
 - Folders named only by a title ID ("PPSA01234-app0-lz4") get the game's name every hour, LZ4 libraries (`PS_LIBRARY_EXTRA`) too, renamed in place; every rename is logged to `ps-renames.json`
@@ -54,7 +54,7 @@ This fork adds what a download-and-sort pipeline on a NAS needs, so no scripts r
 | `PS_IMPORT_FOLDERS` | `true` | Import PS game folders (else they are left for a converter) |
 | `PS_PKG_FOLDER` | `pkg` | PS5 PKG folder under `ps5/` |
 | `PS_LIBRARY_EXTRA` | - | Other PS libraries (an LZ4 test library): only renamed, never filled |
-| `PS_BACKPORT_FOLDER` | `/nas/games/backport ps5` | Where backports are kept |
+| `PS_BACKPORT_FOLDER` | `/nas/games/backport-updates-dlc` | Where PS5 updates, DLC and backports are kept |
 | `PS_RENAME` | `true` | Rename title-ID-only PS folders |
 | `PS_HOLD_FILE` | - | A file that pauses PS imports while it exists |
 | `SWITCH_KEYS_FILE` | `/app/config/switch/prod.keys` | Your own keys; merging is off without them |

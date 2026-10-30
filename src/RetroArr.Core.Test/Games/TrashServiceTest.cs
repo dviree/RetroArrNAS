@@ -41,7 +41,7 @@ namespace RetroArr.Core.Test.Games
         // A trash on another volume: the rename fails and the payload is copied
         private TrashService OtherVolume()
         {
-            var trash = new TrashService(_config);
+            var trash = new TrashService(_config) { Flatten = false };
             trash.Rename = (_, _) => throw CrossDevice();
             return trash;
         }
@@ -278,7 +278,7 @@ namespace RetroArr.Core.Test.Games
         [TestCase(false)]
         public async Task EmptyingTheTrash_LeavesWhatIsNotAnEntry(bool all)
         {
-            var entry = await new TrashService(_config).MoveAsync(Game());
+            var entry = await new TrashService(_config) { Flatten = false }.MoveAsync(Game());
             var other = Path.Combine(_trash, "Games", "Final Fantasy VII.bin");
             Directory.CreateDirectory(Path.GetDirectoryName(other)!);
             File.WriteAllText(other, "not in the trash");
@@ -463,6 +463,22 @@ namespace RetroArr.Core.Test.Games
             Assert.That(trash.PurgeOne(first!.Id), Is.True);
             Assert.That(trash.List(), Is.Empty);
             Assert.That(Directory.GetFileSystemEntries(_trash).Where(n => !Path.GetFileName(n).StartsWith('.')), Is.Empty);
+        }
+
+        [Test]
+        public async Task ATrashedFolder_IsLaidOutFlat_AndComesBackWhole()
+        {
+            var game = Game();
+            var before = Contents(game);
+            var trash = new TrashService(_config);
+
+            var entry = await trash.MoveAsync(game);
+
+            Assert.That(Directory.GetDirectories(_trash).Where(d => !Path.GetFileName(d).StartsWith('.')), Is.Empty, "no folders in the trash");
+            Assert.That(Directory.GetFiles(_trash).Select(Path.GetFileName), Is.EquivalentTo(new[] { "Disc 1.bin", "Disc 2.bin", "ff7.srm" }));
+            Assert.That(trash.Restore(entry!.Id), Is.True);
+            Assert.That(Contents(game), Is.EqualTo(before), "every file back where it was in the folder");
+            Assert.That(Directory.GetFiles(_trash), Is.Empty);
         }
     }
 }

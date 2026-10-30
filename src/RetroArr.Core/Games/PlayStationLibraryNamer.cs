@@ -141,42 +141,40 @@ namespace RetroArr.Core.Games
             }
         }
 
-        // DLC PKGs in roms/ps5/pkg go into roms/ps5/pkg/<Game> [DLC]/, under the same name
+        // Where PS5 update and DLC PKGs go: the folder they share with the backports, outside the library
+        internal string ExtrasRoot = PlayStationImporter.DefaultExtrasRoot;
+
+        // PS5 update and DLC PKGs in roms/ps5/pkg (and its "<Game> [DLC]" folders from before) go to ExtrasRoot
         private void MoveDlcIntoTheirFolder(string ps5, List<(string, string)> done)
         {
             var pkgFolder = Path.Combine(ps5, PlayStationImporter.PkgFolder);
             if (!Directory.Exists(pkgFolder)) return;
             List<string> pkgs;
-            try { pkgs = Directory.EnumerateFiles(pkgFolder, "*.pkg").Where(f => !Path.GetFileName(f).StartsWith('.')).ToList(); }
-            catch (Exception) { return; }
-            foreach (var pkg in pkgs.Where(p => !RecentlyWritten(p)))
+            try
             {
-                if (DlcFolderFor(pkg, ps5) is not { } dlc) continue;
-                var to = Path.Combine(dlc, Path.GetFileName(pkg));
+                pkgs = Directory.EnumerateFiles(pkgFolder, "*.pkg")
+                    .Concat(Directory.EnumerateDirectories(pkgFolder).Where(d => d.EndsWith(" [DLC]", StringComparison.OrdinalIgnoreCase)).SelectMany(d => Directory.EnumerateFiles(d, "*.pkg")))
+                    .Where(f => !Path.GetFileName(f).StartsWith('.')).ToList();
+            }
+            catch (Exception) { return; }
+            var left = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var pkg in pkgs.Where(p => !RecentlyWritten(p) && PlayStationImporter.IsUpdateOrDlcPkg(p)))
+            {
+                var to = Path.Combine(ExtrasRoot, Path.GetFileName(pkg));
                 if (File.Exists(to)) continue;
                 try
                 {
-                    Directory.CreateDirectory(dlc);
+                    Directory.CreateDirectory(ExtrasRoot);
                     Rename(pkg, to);
                     done.Add((pkg, to));
-                    _logger.Info($"[PSNames] Moved DLC {Path.GetFileName(pkg)} into {dlc}");
+                    left.Add(Path.GetDirectoryName(pkg)!);
+                    _logger.Info($"[PSNames] Moved {Path.GetFileName(pkg)} into {ExtrasRoot}");
                 }
                 catch (Exception ex) { _logger.Warn($"[PSNames] Could not move {pkg}: {ex.Message}"); }
             }
-        }
-
-        // roms/ps5/pkg/<Game> [DLC] for a DLC PKG (its name says [DLC ...], or the package does), else null
-        internal static string? DlcFolderFor(string pkg, string ps5)
-        {
-            var name = Path.GetFileName(pkg);
-            var package = name.Contains("[DLC", StringComparison.OrdinalIgnoreCase) ? null : PlayStationPackageInspector.Inspect(pkg);
-            if (package != null && package.Content != PlayStationContent.Dlc) return null;
-            var id = package?.TitleId ?? PlayStationPackageInspector.TitleIdIn(name);
-            var pkgFolder = Path.Combine(ps5, PlayStationImporter.PkgFolder);
-            var game = (id.Length > 0 ? PlayStationImporter.GameTitleIn(id, ps5, pkgFolder) : null)
-                ?? Regex.Replace(name, @"\s*\[.*$", "").Trim();
-            if (game.Length == 0) return null;
-            return Path.Combine(pkgFolder, PlayStationImporter.DlcGameFolder(game));
+            // A "<Game> [DLC]" folder left empty goes
+            foreach (var dir in left.Where(d => !string.Equals(d, pkgFolder, StringComparison.Ordinal)))
+                try { if (!Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir); } catch (Exception) { }
         }
 
         // Loose PKGs in roms/ps5 go into roms/ps5/pkg, under the same name
@@ -189,8 +187,9 @@ namespace RetroArr.Core.Games
             catch (Exception) { return; }
             foreach (var pkg in pkgs.Where(p => !RecentlyWritten(p)))
             {
-                var to = Path.Combine(folder, PlayStationImporter.PkgFolder, Path.GetFileName(pkg));
-                if (DlcFolderFor(pkg, folder) is { } dlc) to = Path.Combine(dlc, Path.GetFileName(pkg));
+                var to = PlayStationImporter.IsUpdateOrDlcPkg(pkg)
+                    ? Path.Combine(ExtrasRoot, Path.GetFileName(pkg))
+                    : Path.Combine(folder, PlayStationImporter.PkgFolder, Path.GetFileName(pkg));
                 if (File.Exists(to)) continue;
                 try
                 {

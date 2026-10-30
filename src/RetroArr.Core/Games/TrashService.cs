@@ -21,6 +21,15 @@ namespace RetroArr.Core.Games
         // Until the source is gone, and for good when the move stops halfway: the entry may hold the only copy of part
         // of the payload, so it is listed but never purged with the rest, only put back or deleted by hand
         public bool Incomplete { get; set; }
+        // A trashed folder is laid out flat: each of its files lies right in the trash under its own name (Name),
+        // with where in the folder it came from (Original, relative). Null for a file, and for entries from before.
+        public List<TrashedFile>? Files { get; set; }
+    }
+
+    public class TrashedFile
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Original { get; set; } = string.Empty;
     }
 
     // Part of a payload is in this entry, the rest is still where it was
@@ -148,8 +157,36 @@ namespace RetroArr.Core.Games
             try { await WriteSidecarAsync(sidecarPath, entry); }
             catch (Exception ex) { _logger.Warn($"[Trash] Could not mark trash entry {entryId} complete, it stays until deleted by hand: {ex.Message}"); }
 
+            if (isDir && Flatten) await FlattenAsync(entry, root, sidecarPath);
+
             _logger.Info($"[Trash] {(isDir ? "Directory" : "File")} moved to trash: {sourcePath} (entry {entryId})");
             return entry;
+        }
+
+        // The files of a trashed folder go right into the trash, each under its own name, so the trash is easy to look
+        // through. Renames within the trash only; the sidecar is written after each, so it always says where all lies.
+        internal bool Flatten = true;
+
+        private async Task FlattenAsync(TrashEntry entry, string root, string sidecarPath)
+        {
+            // A folder with links in it (or a link to a folder) stays whole: its links only make sense where they are
+            var info = new DirectoryInfo(entry.TrashPath);
+            if (info.LinkTarget != null || info.EnumerateFileSystemInfos("*", SearchOption.AllDirectories).Any(i => i.LinkTarget != null)) return;
+            entry.Files ??= new List<TrashedFile>();
+            try
+            {
+                foreach (var file in Directory.EnumerateFiles(entry.TrashPath, "*", SearchOption.AllDirectories).ToList())
+                {
+                    var name = Path.GetFileName(file);
+                    var to = FreeName(root, name.StartsWith('.') ? "_" + name : name);
+                    File.Move(file, to);
+                    entry.Files.Add(new TrashedFile { Name = Path.GetFileName(to), Original = Path.GetRelativePath(entry.TrashPath, file) });
+                    await WriteSidecarAsync(sidecarPath, entry);
+                }
+                // What is left is empty folders
+                if (!Directory.EnumerateFiles(entry.TrashPath, "*", SearchOption.AllDirectories).Any()) Directory.Delete(entry.TrashPath, true);
+            }
+            catch (Exception ex) { _logger.Warn($"[Trash] Could not lay out {entry.TrashPath} flat, the rest stays in its folder: {ex.Message}"); }
         }
 
         // A move that never happened leaves nothing behind, not even an empty .trash-meta
@@ -201,6 +238,8 @@ namespace RetroArr.Core.Games
                         var entry = JsonSerializer.Deserialize<TrashEntry>(File.ReadAllText(sidecar));
                         var payload = Path.GetFileName(entry?.TrashPath);
                         if (entry == null || string.IsNullOrEmpty(payload) || entry.Id != Path.GetFileNameWithoutExtension(sidecar)) continue;
+                        // Each file lies right in the trash; nothing can point outside it
+                        if (entry.Files != null && entry.Files.Any(f => Path.GetFileName(f.Name) != f.Name || f.Name.Length == 0 || Path.IsPathRooted(f.Original) || f.Original.Split('/', '\\').Contains(".."))) continue;
                         // The payload lies right in the trash, so a restore or purge never reaches outside it
                         entry.TrashPath = Path.Combine(root, payload);
                         entries.Add(entry);
@@ -221,7 +260,7 @@ namespace RetroArr.Core.Games
         {
             var entry = Get(id);
             if (entry == null) return false;
-            if (!File.Exists(entry.TrashPath) && !Directory.Exists(entry.TrashPath))
+            if (!File.Exists(entry.TrashPath) && !Directory.Exists(entry.TrashPath) && !(entry.Files?.Count > 0))
             {
                 _logger.Warn($"[Trash] Restore: payload missing for {id}");
                 return false;
@@ -239,7 +278,16 @@ namespace RetroArr.Core.Games
                     return false;
                 }
 
-                Move(entry.TrashPath, target);
+                if (entry.Files == null || Directory.Exists(entry.TrashPath)) Move(entry.TrashPath, target);
+                else Directory.CreateDirectory(target);
+                // A folder laid out flat gets its files back where they were in it
+                foreach (var file in entry.Files ?? new List<TrashedFile>())
+                {
+                    var from = Path.Combine(GetTrashRoot(), file.Name);
+                    var to = Path.Combine(target, file.Original);
+                    Directory.CreateDirectory(Path.GetDirectoryName(to)!);
+                    if (File.Exists(from)) Move(from, to);
+                }
 
                 DropEntry(entry);
                 _logger.Info($"[Trash] Restored {id} to {target}");
@@ -287,6 +335,8 @@ namespace RetroArr.Core.Games
                     if (!SamePath(Path.GetDirectoryName(entry.TrashPath), root)) return false;
                     if (Directory.Exists(entry.TrashPath)) Delete(entry.TrashPath);
                     else if (File.Exists(entry.TrashPath)) File.Delete(entry.TrashPath);
+                    foreach (var file in entry.Files ?? new List<TrashedFile>())
+                        if (File.Exists(Path.Combine(root, file.Name))) File.Delete(Path.Combine(root, file.Name));
                     File.Delete(Path.Combine(root, MetaFolder, entry.Id + ".json"));
                 }
                 _logger.Info($"[Trash] Purged {entry.Id}");
