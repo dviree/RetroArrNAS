@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v trail >/dev/null 2>&1 || npm install -g @trailhq/trail-code@0.28.0 >/dev/null 2>&1; exit 0",
+            "timeout": 240
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR:-.}/.trail/hook.cjs\" session-start || exit 0",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
