@@ -55,6 +55,25 @@ namespace RetroArr.Core.Games
 
         private static bool IsEntry(string dir) => _entryName.IsMatch(Path.GetFileName(dir));
 
+        // What lies in the trash lies there under its own name, easy to look through; what the trash knows about it is
+        // kept beside, in this hidden folder (one <entry>.json each). Entries from before (a folder per entry with its
+        // meta.json) are still listed, restored and purged.
+        private const string MetaFolder = ".trash-meta";
+
+        private static string FreeName(string root, string name)
+        {
+            var path = Path.Combine(root, name);
+            if (!File.Exists(path) && !Directory.Exists(path)) return path;
+            var stem = Path.GetFileNameWithoutExtension(name);
+            var ext = Directory.Exists(path) ? string.Empty : Path.GetExtension(name);
+            if (ext.Length == 0) stem = name;
+            for (var i = 2; ; i++)
+            {
+                var candidate = Path.Combine(root, $"{stem} ({i}){ext}");
+                if (!File.Exists(candidate) && !Directory.Exists(candidate)) return candidate;
+            }
+        }
+
         private string GetTrashRoot()
         {
             var settings = _config.LoadMediaSettings();
@@ -77,13 +96,12 @@ namespace RetroArr.Core.Games
             var root = GetTrashRoot();
             var isDir = Directory.Exists(sourcePath);
             var entryId = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "_" + Guid.NewGuid().ToString("N").Substring(0, 8);
-            var entryDir = Path.Combine(root, entryId);
-            Directory.CreateDirectory(entryDir);
+            var metaDir = Directory.CreateDirectory(Path.Combine(root, MetaFolder)).FullName;
+            var sidecarPath = Path.Combine(metaDir, entryId + ".json");
 
-            var payloadName = isDir ? new DirectoryInfo(sourcePath).Name : Path.GetFileName(sourcePath);
-            // the sidecar would overwrite it
-            if (payloadName.Equals("meta.json", StringComparison.OrdinalIgnoreCase)) payloadName += ".payload";
-            var destPath = Path.Combine(entryDir, payloadName);
+            var payloadName = isDir ? new DirectoryInfo(Path.TrimEndingDirectorySeparator(sourcePath)).Name : Path.GetFileName(sourcePath);
+            if (payloadName.StartsWith('.')) payloadName = "_" + payloadName;
+            var destPath = FreeName(root, payloadName);
             var entry = new TrashEntry
             {
                 Id = entryId,
@@ -100,11 +118,11 @@ namespace RetroArr.Core.Games
             // The sidecar comes first: a payload the trash can't list could never be put back
             try
             {
-                await WriteSidecarAsync(entryDir, entry);
+                await WriteSidecarAsync(sidecarPath, entry);
             }
             catch (Exception ex)
             {
-                try { Directory.Delete(entryDir, true); } catch { }
+                ForgetSidecar(sidecarPath);
                 throw new IOException($"Could not write the trash entry for {sourcePath}, nothing was moved: {ex.Message}", ex);
             }
 
@@ -118,7 +136,7 @@ namespace RetroArr.Core.Games
                 // Nothing reached the trash, the source is as it was
                 if (!File.Exists(destPath) && !Directory.Exists(destPath))
                 {
-                    try { Directory.Delete(entryDir, true); } catch { }
+                    ForgetSidecar(sidecarPath);
                     throw;
                 }
                 // What got to the trash stays listed there, so it can be found and put back
@@ -127,15 +145,27 @@ namespace RetroArr.Core.Games
 
             // The source is gone, the entry holds all of it
             entry.Incomplete = false;
-            try { await WriteSidecarAsync(entryDir, entry); }
+            try { await WriteSidecarAsync(sidecarPath, entry); }
             catch (Exception ex) { _logger.Warn($"[Trash] Could not mark trash entry {entryId} complete, it stays until deleted by hand: {ex.Message}"); }
 
             _logger.Info($"[Trash] {(isDir ? "Directory" : "File")} moved to trash: {sourcePath} (entry {entryId})");
             return entry;
         }
 
-        private static Task WriteSidecarAsync(string entryDir, TrashEntry entry) =>
-            File.WriteAllTextAsync(Path.Combine(entryDir, "meta.json"), JsonSerializer.Serialize(entry, new JsonSerializerOptions { WriteIndented = true }));
+        // A move that never happened leaves nothing behind, not even an empty .trash-meta
+        private static void ForgetSidecar(string sidecarPath)
+        {
+            try
+            {
+                File.Delete(sidecarPath);
+                var dir = Path.GetDirectoryName(sidecarPath)!;
+                if (!Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir);
+            }
+            catch { }
+        }
+
+        private static Task WriteSidecarAsync(string sidecarPath, TrashEntry entry) =>
+            File.WriteAllTextAsync(sidecarPath, JsonSerializer.Serialize(entry, new JsonSerializerOptions { WriteIndented = true }));
 
         public List<TrashEntry> List()
         {
@@ -161,6 +191,25 @@ namespace RetroArr.Core.Games
                     _logger.Warn($"[Trash] Could not read sidecar {sidecar}: {ex.Message}");
                 }
             }
+
+            var metaDir = Path.Combine(root, MetaFolder);
+            if (Directory.Exists(metaDir))
+                foreach (var sidecar in Directory.EnumerateFiles(metaDir, "*.json"))
+                {
+                    try
+                    {
+                        var entry = JsonSerializer.Deserialize<TrashEntry>(File.ReadAllText(sidecar));
+                        var payload = Path.GetFileName(entry?.TrashPath);
+                        if (entry == null || string.IsNullOrEmpty(payload) || entry.Id != Path.GetFileNameWithoutExtension(sidecar)) continue;
+                        // The payload lies right in the trash, so a restore or purge never reaches outside it
+                        entry.TrashPath = Path.Combine(root, payload);
+                        entries.Add(entry);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Warn($"[Trash] Could not read sidecar {sidecar}: {ex.Message}");
+                    }
+                }
 
             return entries.OrderByDescending(e => e.DeletedAt).ToList();
         }
@@ -192,12 +241,7 @@ namespace RetroArr.Core.Games
 
                 Move(entry.TrashPath, target);
 
-                // Drop the sidecar folder (meta.json + now-empty payload name).
-                var entryDir = Path.GetDirectoryName(entry.TrashPath);
-                if (!string.IsNullOrEmpty(entryDir) && Directory.Exists(entryDir))
-                {
-                    try { Directory.Delete(entryDir, true); } catch { }
-                }
+                DropEntry(entry);
                 _logger.Info($"[Trash] Restored {id} to {target}");
                 return true;
             }
@@ -214,13 +258,37 @@ namespace RetroArr.Core.Games
             return entry != null && Purge(entry);
         }
 
-        private static bool Purge(TrashEntry entry)
+        // The entry's description, and for an old entry its folder (now empty of its payload)
+        private void DropEntry(TrashEntry entry)
         {
-            var entryDir = Path.GetDirectoryName(entry.TrashPath);
-            if (string.IsNullOrEmpty(entryDir)) return false;
+            var root = GetTrashRoot();
+            var oldDir = Path.Combine(root, entry.Id);
             try
             {
-                if (Directory.Exists(entryDir)) Directory.Delete(entryDir, true);
+                if (Directory.Exists(oldDir) && SamePath(Path.GetDirectoryName(entry.TrashPath), oldDir)) Directory.Delete(oldDir, true);
+                else File.Delete(Path.Combine(root, MetaFolder, entry.Id + ".json"));
+            }
+            catch (Exception) { }
+        }
+
+        private static bool SamePath(string? a, string b) =>
+            a != null && string.Equals(Path.GetFullPath(a).TrimEnd(Path.DirectorySeparatorChar), Path.GetFullPath(b).TrimEnd(Path.DirectorySeparatorChar), StringComparison.Ordinal);
+
+        private bool Purge(TrashEntry entry)
+        {
+            var root = GetTrashRoot();
+            var oldDir = Path.Combine(root, entry.Id);
+            try
+            {
+                if (Directory.Exists(oldDir) && SamePath(Path.GetDirectoryName(entry.TrashPath), oldDir)) Directory.Delete(oldDir, true);
+                else
+                {
+                    // Only what lies right in the trash, never anything outside it
+                    if (!SamePath(Path.GetDirectoryName(entry.TrashPath), root)) return false;
+                    if (Directory.Exists(entry.TrashPath)) Delete(entry.TrashPath);
+                    else if (File.Exists(entry.TrashPath)) File.Delete(entry.TrashPath);
+                    File.Delete(Path.Combine(root, MetaFolder, entry.Id + ".json"));
+                }
                 _logger.Info($"[Trash] Purged {entry.Id}");
                 return true;
             }

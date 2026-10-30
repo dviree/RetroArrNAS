@@ -204,7 +204,7 @@ namespace RetroArr.Core.Test.Games
             var listed = false;
             trash.Rename = (from, to) =>
             {
-                listed = File.Exists(Path.Combine(Path.GetDirectoryName(to)!, "meta.json"));
+                listed = Directory.EnumerateFiles(Path.Combine(Path.GetDirectoryName(to)!, ".trash-meta"), "*.json").Any();
                 Directory.Move(from, to);
             };
 
@@ -288,7 +288,7 @@ namespace RetroArr.Core.Test.Games
             var purged = all ? trash.PurgeAll() : trash.PurgeExpired();
 
             Assert.That(purged, Is.EqualTo(all ? 1 : 0));
-            Assert.That(Directory.Exists(Path.GetDirectoryName(entry!.TrashPath)), Is.EqualTo(!all));
+            Assert.That(Directory.Exists(entry!.TrashPath), Is.EqualTo(!all));
             Assert.That(File.Exists(other), Is.True);
         }
 
@@ -331,7 +331,7 @@ namespace RetroArr.Core.Test.Games
             });
             var ex = Assert.ThrowsAsync<TrashPartialMoveException>(() => trash.MoveAsync(game));
             // long past the retention
-            var sidecar = Path.Combine(Path.GetDirectoryName(trash.List().Single().TrashPath)!, "meta.json");
+            var sidecar = Path.Combine(Path.GetDirectoryName(trash.List().Single().TrashPath)!, ".trash-meta", trash.List().Single().Id + ".json");
             var stored = System.Text.Json.JsonSerializer.Deserialize<TrashEntry>(File.ReadAllText(sidecar))!;
             stored.DeletedAt = new DateTime(2020, 1, 1);
             File.WriteAllText(sidecar, System.Text.Json.JsonSerializer.Serialize(stored));
@@ -439,6 +439,30 @@ namespace RetroArr.Core.Test.Games
 
             Assert.That(result, Is.InstanceOf<OkObjectResult>());
             Assert.That(_config.LoadMediaSettings().RenameOnImport, Is.True);
+        }
+
+        [Test]
+        public async Task TrashedThings_LieInTheTrashUnderTheirOwnName_NoFolderPerEntry()
+        {
+            var trash = new TrashService(_config);
+            var one = Path.Combine(_root, "library", "a", "Zelda.nsp");
+            var two = Path.Combine(_root, "library", "b", "Zelda.nsp");
+            foreach (var f in new[] { one, two })
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(f)!);
+                File.WriteAllText(f, f);
+            }
+
+            var first = await trash.MoveAsync(one);
+            var second = await trash.MoveAsync(two);
+
+            Assert.That(Directory.GetFileSystemEntries(_trash).Select(Path.GetFileName).Where(n => !n!.StartsWith('.')),
+                Is.EquivalentTo(new[] { "Zelda.nsp", "Zelda (2).nsp" }));
+            Assert.That(trash.Restore(second!.Id), Is.True);
+            Assert.That(File.ReadAllText(two), Is.EqualTo(two));
+            Assert.That(trash.PurgeOne(first!.Id), Is.True);
+            Assert.That(trash.List(), Is.Empty);
+            Assert.That(Directory.GetFileSystemEntries(_trash).Where(n => !Path.GetFileName(n).StartsWith('.')), Is.Empty);
         }
     }
 }
