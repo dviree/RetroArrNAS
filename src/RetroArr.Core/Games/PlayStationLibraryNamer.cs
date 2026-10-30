@@ -77,6 +77,8 @@ namespace RetroArr.Core.Games
                 }
             // The LZ4 library: names only, in place
             foreach (var extra in PlayStationImporter.OtherLibraries) yield return extra;
+            // PS5 updates, DLC and backports, outside the library: they get the game's name too
+            yield return ExtrasRoot;
         }
 
         /// <summary>Renames what needs a name. Returns the renames made, old path to new path.</summary>

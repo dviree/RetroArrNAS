@@ -165,5 +165,16 @@ namespace RetroArr.Core.Test.Games
             File.SetLastWriteTimeUtc(Path.Combine(dir, "data.bin"), DateTime.UtcNow.AddDays(-1));
             Assert.That(await _namer.RunOnceAsync(), Is.Empty);
         }
+
+        [Test]
+        public async Task UpdatesAndDlcOutsideTheLibrary_GetTheGamesName_Too()
+        {
+            _namer.ExtrasRoot = Directory.CreateDirectory(Path.Combine(_root, "backport-updates-dlc")).FullName;
+            Game(_namer.ExtrasRoot, "PPSA26344-app0");
+
+            await _namer.RunOnceAsync();
+
+            Assert.That(Directory.Exists(Path.Combine(_namer.ExtrasRoot, "Ghost of Yōtei [PPSA26344] [v1.0.2]")), Is.True);
+        }
     }
 }
