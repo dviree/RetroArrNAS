@@ -42,6 +42,7 @@ namespace RetroArr.Core.Test.Games
                 Nscb = nscb,
                 NscbRust = Path.Combine(_root, "nscb_rust"),
                 NscbRustUrl = null,
+                PartsFolder = Path.Combine(_root, "switch-parts"),
                 KeysFile = keys,
                 WorkRoot = Path.Combine(_root, "temp"),
                 FreeSpace = _ => long.MaxValue,
@@ -74,6 +75,7 @@ namespace RetroArr.Core.Test.Games
         {
             _service.Dispose();
             SwitchMergeService.VerifySettle = TimeSpan.FromHours(1);
+            SwitchMergeService.PartSettle = TimeSpan.FromMinutes(10);
             Directory.Delete(_root, true);
         }
 
@@ -96,7 +98,7 @@ namespace RetroArr.Core.Test.Games
             Assert.That(await _service.RunOnceAsync(), Is.EqualTo(1));
 
             var left = Directory.EnumerateFiles(_switch, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(_switch, f)).ToList();
-            Assert.That(left, Is.EqualTo(new[] { Path.Combine("Zelda", "The Legend of Zelda Tears of the Kingdom [0100F2C0115B6000][v393216].nsp") }),
+            Assert.That(left, Is.EqualTo(new[] { "The Legend of Zelda Tears of the Kingdom [0100F2C0115B6000][v393216].nsp" }),
                 "the official title NSC_Builder read from the game");
             Assert.That(new FileInfo(Path.Combine(_switch, left[0])).Length, Is.EqualTo(135), "base + newest update + DLC");
             Assert.That(Directory.EnumerateFiles(Path.Combine(_root, "bin"), "*.nsp", SearchOption.AllDirectories).Count(), Is.EqualTo(4), "every part, the old update too");
@@ -276,6 +278,37 @@ namespace RetroArr.Core.Test.Games
             var log = File.ReadAllText(Path.Combine(_root, "config", "switch-verify.log"));
             Assert.That(log, Does.Contain("BROKEN " + bad));
             Assert.That(File.Exists(bad), Is.True, "nothing is moved or deleted");
+        }
+
+        [Test]
+        public void Tidy_LeavesOneFilePerGameInRoms_PartsWaitOutside()
+        {
+            SwitchMergeService.PartSettle = TimeSpan.Zero;
+            Part("Mario Kart/Mario Kart [0100152000022000][v0].nsp", 100);
+            Part("Mario Kart/Mario Kart [0100152000022800][v262144].nsp", 30);
+            Part("Splatoon/Splatoon 3 [0100C2500FC20000][v0].nsp", 50);
+            Part("Lonely Update [0100AAAA00000800][v65536].nsp", 5);
+
+            _service.Tidy(_switch);
+
+            Assert.That(Directory.EnumerateFileSystemEntries(_switch).Select(Path.GetFileName), Is.EqualTo(new[] { "Splatoon 3 [0100C2500FC20000][v0].nsp" }),
+                "only single-file games in roms/switch, and no folders");
+            Assert.That(Directory.EnumerateFiles(_service.PartsFolder).Count(), Is.EqualTo(3), "Mario Kart's two parts and the update without its base");
+        }
+
+        [Test]
+        public async Task AMergeFromThePartsFolder_LandsInRomsAsOneFile()
+        {
+            File.WriteAllText(_service.NscbRust, "");
+            SwitchMergeService.PartSettle = TimeSpan.Zero;
+            Part("Zelda/Zelda [0100F2C0115B6000][v0].nsp", 100);
+            Part("Zelda/Zelda [0100F2C0115B6800][v393216].nsp", 30);
+
+            Assert.That(await _service.RunOnceAsync(), Is.EqualTo(1));
+
+            Assert.That(Directory.EnumerateFileSystemEntries(_switch).Select(Path.GetFileName),
+                Is.EqualTo(new[] { "The Legend of Zelda Tears of the Kingdom [0100F2C0115B6000][v393216].nsp" }));
+            Assert.That(Directory.Exists(_service.PartsFolder) ? Directory.EnumerateFileSystemEntries(_service.PartsFolder) : Array.Empty<string>(), Is.Empty);
         }
     }
 }

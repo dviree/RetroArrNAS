@@ -56,6 +56,11 @@ namespace RetroArr.Core.Games
         private bool _rustFetchTried;
         internal string KeysFile = Environment.GetEnvironmentVariable("SWITCH_KEYS_FILE") ?? "/app/config/switch/prod.keys";
         internal string WorkRoot = Environment.GetEnvironmentVariable("SWITCH_WORK") ?? "/temp/retroarr-switch";
+        // roms/switch holds one file per game. A game in more than one file (base, update, DLC not merged yet, or an
+        // update or DLC whose base is not there) waits here, outside the library, until it is merged.
+        internal string PartsFolder = Environment.GetEnvironmentVariable("SWITCH_PARTS_FOLDER") ?? "/nas/games/switch-parts";
+        // A part written to this recently may still be on its way in
+        internal static TimeSpan PartSettle = TimeSpan.FromMinutes(10);
         internal TimeSpan Interval = TimeSpan.FromMinutes(
             int.TryParse(Environment.GetEnvironmentVariable("SWITCH_MERGE_MINUTES"), out var m) && m > 0 ? m : 30);
         // A family that failed is tried again once its files change, or after this long
@@ -151,7 +156,9 @@ namespace RetroArr.Core.Games
             if (!UsesRust && !File.Exists(Nscb)) return 0;
             var state = LoadState();
             var merged = 0;
-            foreach (var family in Plan(Scan(library)))
+            Tidy(library);
+            var parts = Scan(library).Concat(Directory.Exists(PartsFolder) ? Scan(PartsFolder) : new List<Part>()).ToList();
+            foreach (var family in Plan(parts))
             {
                 ct.ThrowIfCancellationRequested();
                 if (state.TryGetValue(family.Fingerprint, out var failedAt) && DateTime.UtcNow - failedAt < RetryAfter) continue;
@@ -244,6 +251,7 @@ namespace RetroArr.Core.Games
         /// <summary>Merge, verify, publish, retire. Null when done; otherwise why nothing was changed.</summary>
         internal async Task<string?> MergeAsync(Family family, CancellationToken ct)
         {
+            var library = LibraryFolder ?? Path.GetDirectoryName(family.Base.Path)!;
             var inputs = family.Inputs.ToList();
             var total = inputs.Sum(p => p.Size);
             Directory.CreateDirectory(WorkRoot);
@@ -299,7 +307,8 @@ namespace RetroArr.Core.Games
                 var verdict = Verdict(verifyLog);
                 if (verifyCode != 0 || verdict != null) return $"verification failed: {verdict ?? $"exit {verifyCode}"}";
 
-                var folder = Path.GetDirectoryName(family.Base.Path)!;
+                // One file per game, right in roms/switch
+                var folder = library;
                 // NSC_Builder names its output from the game's own control data (NACP): the official title
                 var target = Path.Combine(folder, PublishName(family, Path.GetFileName(mergedFile)));
                 if (File.Exists(target) && !inputs.Any(p => SamePath(p.Path, target))) return $"{Path.GetFileName(target)} is already there";
@@ -319,7 +328,8 @@ namespace RetroArr.Core.Games
                 }
                 File.Move(partial, target);
                 await PointLibraryAtAsync(inputs.Concat(family.Superseded).Select(p => p.Path), target);
-                RemoveEmptyFolders(inputs.Concat(family.Superseded).Select(p => Path.GetDirectoryName(p.Path)!), Path.GetDirectoryName(folder)!);
+                foreach (var root in new[] { library, PartsFolder })
+                    RemoveEmptyFolders(inputs.Concat(family.Superseded).Select(p => Path.GetDirectoryName(p.Path)!).Where(d => d.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal)), root);
                 _logger.Info($"[SwitchMerge] Published {target}; {inputs.Count + family.Superseded.Count} parts to the trash");
                 return null;
             }
@@ -361,10 +371,60 @@ namespace RetroArr.Core.Games
             try
             {
                 var old = new HashSet<string>(oldPaths, StringComparer.Ordinal);
-                foreach (var game in (await _games.GetAllLightAsync()).Where(g => g.ExecutablePath != null && old.Contains(g.ExecutablePath)))
-                    await _games.UpdateFieldsAsync(game.Id, g => g.ExecutablePath = target);
+                var oldFolders = new HashSet<string>(old.Select(p => Path.GetDirectoryName(p)!), StringComparer.Ordinal);
+                foreach (var game in (await _games.GetAllLightAsync()).Where(g => (g.ExecutablePath != null && old.Contains(g.ExecutablePath))
+                             || (g.Path != null && (old.Contains(g.Path) || oldFolders.Contains(Path.TrimEndingDirectorySeparator(g.Path))))))
+                    await _games.UpdateFieldsAsync(game.Id, g => { g.ExecutablePath = target; g.Path = target; });
             }
             catch (Exception ex) { _logger.Warn($"[SwitchMerge] {target} is published, but the library list is not updated yet (the next scan does it): {ex.Message}"); }
+        }
+
+        /// <summary>
+        /// Keeps roms/switch at one file per game: a game that is one file lies right in roms/switch; a game in more
+        /// than one file (or an update or DLC without its base) goes to the parts folder until it is merged. Folders
+        /// left empty in roms/switch go. Nothing is deleted; files are only moved, never over another.
+        /// </summary>
+        internal void Tidy(string library)
+        {
+            var now = DateTime.UtcNow;
+            var settled = Scan(library).Concat(Directory.Exists(PartsFolder) ? Scan(PartsFolder) : new List<Part>())
+                .Where(p => now - File.GetLastWriteTimeUtc(p.Path) >= PartSettle).ToList();
+            var moved = new List<string>();
+            foreach (var group in settled.GroupBy(p => p.BaseId))
+            {
+                var bases = group.Where(p => p.IsBase).OrderByDescending(p => p.Size).ToList();
+                var single = bases.Count == 1 && group.Count() == 1;
+                foreach (var part in group)
+                {
+                    var into = single ? library : PartsFolder;
+                    if (SamePath(Path.GetDirectoryName(part.Path)!, into)) continue;
+                    var to = Path.Combine(into, Path.GetFileName(part.Path));
+                    if (File.Exists(to)) { _logger.Warn($"[SwitchMerge] {to} is there already; {part.Path} stays where it is"); continue; }
+                    try
+                    {
+                        Directory.CreateDirectory(into);
+                        MoveFile(part.Path, to);
+                        moved.Add(Path.GetDirectoryName(part.Path)!);
+                        _ = PointLibraryAtAsync(new[] { part.Path }, to);
+                        Note($"moved {part.Path} -> {to}");
+                        _logger.Info($"[SwitchMerge] {Path.GetFileName(part.Path)} -> {into}");
+                    }
+                    catch (Exception ex) { _logger.Warn($"[SwitchMerge] Could not move {part.Path}: {ex.Message}"); }
+                }
+            }
+            foreach (var root in new[] { library, PartsFolder })
+                RemoveEmptyFolders(moved.Where(d => d.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal)), root);
+        }
+
+        // Within a volume a rename; roms and the parts folder may be different mounts of it, so through the shared
+        // mount when there is one, else a copy and a delete
+        private static void MoveFile(string from, string to)
+        {
+            try { File.Move(from, to); }
+            catch (IOException) when (IO.SharedMount.Translate(from) is { } f && IO.SharedMount.Translate(to) is { } t)
+            {
+                File.Move(f, t);
+            }
         }
 
         private static void RemoveEmptyFolders(IEnumerable<string> folders, string stopAt)
