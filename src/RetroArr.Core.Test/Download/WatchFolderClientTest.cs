@@ -47,6 +47,21 @@ namespace RetroArr.Core.Test.Download
         private async Task<List<DownloadStatus>> List() => await new WatchFolderClient(_root, "games").GetDownloadsAsync();
 
         [Test]
+        public async Task APcRelease_IsOneGame_HoweverDeepItsExeLies()
+        {
+            Write("Sackboy-SteamRIP.com/Sackboy/Sackboy.exe");
+            Write("Sackboy-SteamRIP.com/Sackboy/Sackboy/Binaries/Win64/Sackboy-Win64-Shipping.exe");
+            Write("Sackboy-SteamRIP.com/Sackboy/Sackboy/Content/Paks/pak0.pak");
+            Write("Sackboy-SteamRIP.com/_CommonRedist/vcredist_x64.exe");
+            Write("Two Games/Game A/a.exe");
+            Write("Two Games/Game B/b.exe");
+
+            var names = (await new WatchFolderClient(_root, null, recursive: true).GetDownloadsAsync()).Select(d => d.Name).OrderBy(n => n, StringComparer.Ordinal).ToList();
+
+            Assert.That(names, Is.EqualTo(new[] { "Game A", "Game B", "Sackboy-SteamRIP.com" }), "one release one game; a folder of games is looked into");
+        }
+
+        [Test]
         public async Task JDownloadersExtractedFolder_HoldsReleases_EachOneADownload()
         {
             Write("extracted/[Nintendo Wii] Super Mario Galaxy 2 [NTSC]/game.wbfs", "wii-game");

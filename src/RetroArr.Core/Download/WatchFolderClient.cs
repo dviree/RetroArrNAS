@@ -26,7 +26,8 @@ namespace RetroArr.Core.Download
         private static readonly NLog.Logger _logger = NLog.LogManager.GetLogger(Logging.AppLoggerService.DownloadClient);
 
         // Something written to in this window may still be on its way in
-        internal static TimeSpan SettleTime = TimeSpan.FromMinutes(2);
+        // A big PC release is unpacked for a long while; taken any earlier, one release lands as several games
+        internal static TimeSpan SettleTime = TimeSpan.FromMinutes(15);
 
         // PS4/PS5 images and packages are big and written slowly by converters: they have to be still for longer
         internal static TimeSpan PlayStationSettleTime = TimeSpan.FromMinutes(15);
@@ -336,6 +337,9 @@ namespace RetroArr.Core.Download
             if (depth >= MaxDepth) return Kind.Game;
             static bool IsPlayStationRoot(DirectoryInfo d) => File.Exists(Path.Combine(d.FullName, "eboot.bin")) || Directory.Exists(Path.Combine(d.FullName, "sce_sys"));
             if (IsPlayStationRoot(dir)) return Kind.Game;
+            // A PC release is one game however deep its .exe lies ("Sackboy-SteamRIP.com/Sackboy/Sackboy.exe" beside
+            // _CommonRedist): taken apart, each folder in it would land as a game of its own
+            if (PcGameFolders(dir) == 1) return Kind.Game;
             // A release folder around one PPSA01234-app0 folder is the game, so its name and leftovers go with it
             try
             {
@@ -359,6 +363,33 @@ namespace RetroArr.Core.Download
                     return Kind.RomSet;
             }
             return Kind.Game;
+        }
+
+        // A PC repack's own name ("Game-SteamRIP.com", "Game [FitGirl Repack]")
+        private static readonly Regex PcReleaseTag = new(@"(?i)(SteamRIP|FitGirl|DODI|ElAmigos|EMPRESS|Razor1911|KaOs|GOG-?Games|SteamUnlocked|Online-?Fix|-RUNE|-TENOKE|-CODEX|-FLT|-SKIDROW|-PLAZA)", RegexOptions.Compiled);
+
+        private static readonly HashSet<string> RedistFolders = new(StringComparer.OrdinalIgnoreCase)
+            { "_CommonRedist", "CommonRedist", "Redist", "_Redist", "DirectX", "Support", "_Support", "Installers" };
+
+        // How many PC games a folder holds: 1 when it has a Windows program of its own (not a redistributable) right
+        // in it or in exactly one of its folders, more when several of its folders each have one, 0 when none
+        private static int PcGameFolders(DirectoryInfo dir)
+        {
+            static bool HasExe(DirectoryInfo d) => d.EnumerateFiles("*.exe", new EnumerationOptions { RecurseSubdirectories = true, MaxRecursionDepth = 4, IgnoreInaccessible = true })
+                .Any(f => !f.FullName.Split(Path.DirectorySeparatorChar).Any(RedistFolders.Contains));
+            try
+            {
+                if (dir.EnumerateFiles("*.exe").Any()) return 1;
+                if (dir.EnumerateFiles().Any(f => RomExtensions.Contains(f.Extension))) return 0;
+                var subs = dir.EnumerateDirectories().Where(d => !d.Name.StartsWith('.')).ToList();
+                var games = subs.Where(d => !RedistFolders.Contains(d.Name) && HasExe(d)).ToList();
+                if (games.Count != 1) return games.Count;
+                // One game folder in a release ("Sackboy-SteamRIP.com/Sackboy" with _CommonRedist beside it) is the
+                // release; one in a folder named for something else ("usenet/Graveyard Keeper 2") is just that game
+                static HashSet<string> Words(string n) => Regex.Matches(n.ToLowerInvariant(), "[a-z0-9]{3,}").Select(m => m.Value).ToHashSet();
+                return Words(games[0].Name).Overlaps(Words(dir.Name)) || PcReleaseTag.IsMatch(dir.Name) ? 1 : 2;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return 0; }
         }
 
         // At least half of the folder name's words appear in the file's name
