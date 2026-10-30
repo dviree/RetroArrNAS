@@ -76,7 +76,7 @@ namespace RetroArr.Core.Test.MetadataSource
         {
             var (ai, fake) = Create($"{{\"platform\": \"{store}\", \"title\": \"Castlevania Belmont's Curse\", \"confidence\": 0.95}}");
             var guess = await ai.IdentifyAsync("Castlevania Belmonts Curse", new[] { "Castlevania.exe" });
-            Assert.That(guess!.Platform, Is.EqualTo("windows"));
+            Assert.That(guess!.Platform, Is.EqualTo("pc"), "the PC folder");
             Assert.That(fake.Bodies[0], Does.Not.Contain("steam: Steam"), "stores are not offered as platforms");
         }
 

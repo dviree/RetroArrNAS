@@ -711,7 +711,7 @@ namespace RetroArr.Core.Test.Download
             });
 
             Assert.That(result.Success, Is.True, result.Reason);
-            Assert.That(Directory.GetFiles(Path.Combine(Library, "windows"), file, SearchOption.AllDirectories), Has.Length.EqualTo(1));
+            Assert.That(Directory.GetFiles(Path.Combine(Library, "pc"), file, SearchOption.AllDirectories), Has.Length.EqualTo(1));
         }
 
         [Test]

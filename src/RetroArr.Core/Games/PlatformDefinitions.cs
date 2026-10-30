@@ -49,7 +49,7 @@ namespace RetroArr.Core.Games
             new Platform { Id = UnknownPlatformId, Name = "Unknown", Slug = "unknown", FolderName = "unknown", Type = PlatformType.Other, Category = "Special", IgdbPlatformId = null, Enabled = false },
 
             // ========== PC / Computer ==========
-            new Platform { Id = 1, Name = "PC (Windows)", Slug = "pc", FolderName = "windows", Type = PlatformType.PC, Category = "Computer", IgdbPlatformId = 6, Enabled = true },
+            new Platform { Id = 1, Name = "PC (Windows)", Slug = "pc", FolderName = "pc", FolderAliases = new[] { "windows" }, Type = PlatformType.PC, Category = "Computer", IgdbPlatformId = 6, Enabled = true },
             new Platform { Id = 2, Name = "macOS", Slug = "macos", FolderName = "macintosh", Type = PlatformType.MacOS, Category = "Computer", IgdbPlatformId = 14, Enabled = true },
             new Platform { Id = 3, Name = "MS-DOS", Slug = "dos", FolderName = "dos", Type = PlatformType.DOS, Category = "Computer", IgdbPlatformId = 13, Enabled = true },
             new Platform { Id = 4, Name = "Amiga", Slug = "amiga", FolderName = "amiga", Type = PlatformType.Amiga, Category = "Computer", IgdbPlatformId = 16, ScreenScraperSystemId = 64, Enabled = false, RetroBatFolderName = "amiga500", BatoceraFolderName = "amiga500" },
