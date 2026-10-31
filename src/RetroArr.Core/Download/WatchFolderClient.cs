@@ -68,7 +68,10 @@ namespace RetroArr.Core.Download
         // Leftovers and NAS bookkeeping that are never a game
         private static readonly HashSet<string> NeverGames = new(StringComparer.OrdinalIgnoreCase)
         {
-            "_CommonRedist", "CommonRedist", "__MACOSX", "@eaDir", "#recycle", "$RECYCLE.BIN", "System Volume Information"
+            "_CommonRedist", "CommonRedist", "__MACOSX", "@eaDir", "#recycle", "$RECYCLE.BIN", "System Volume Information",
+            // Runtimes and engine parts a PC release brings along: taken for games, they landed as empty PhysX,
+            // Vorbis and Windows folders in the library
+            "PhysX", "Vorbis", "Windows", "DirectX", "Redist", "_Redist", "Prerequisites", "Engine"
         };
 
         // Files that say nothing about whether a folder is a game

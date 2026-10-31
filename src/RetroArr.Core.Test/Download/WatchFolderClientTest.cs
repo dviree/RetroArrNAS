@@ -62,6 +62,19 @@ namespace RetroArr.Core.Test.Download
         }
 
         [Test]
+        public async Task RuntimeAndEngineFolders_AreNeverGames()
+        {
+            Write("loose/PhysX/PhysX_9.21.0713_SystemSoftware.exe");
+            Write("loose/Vorbis/vorbis.dll");
+            Write("loose/Windows/setup.exe");
+            Write("loose/Dead Cells/deadcells.exe");
+
+            var names = (await new WatchFolderClient(_root, null, recursive: true).GetDownloadsAsync()).Select(d => d.Name).ToList();
+
+            Assert.That(names, Is.EqualTo(new[] { "Dead Cells" }));
+        }
+
+        [Test]
         public async Task JDownloadersExtractedFolder_HoldsReleases_EachOneADownload()
         {
             Write("extracted/[Nintendo Wii] Super Mario Galaxy 2 [NTSC]/game.wbfs", "wii-game");
