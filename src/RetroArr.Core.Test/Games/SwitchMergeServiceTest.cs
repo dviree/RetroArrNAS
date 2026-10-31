@@ -318,5 +318,20 @@ namespace RetroArr.Core.Test.Games
         {
             Assert.That(SwitchMergeService.NameFor(new SwitchMergeService.Part("/x/" + file, id, version, 1)), Is.EqualTo(expected));
         }
+
+        [Test]
+        public async Task AFolderWithNoGameLeft_GoesToTheTrash_GamesStay()
+        {
+            SwitchMergeService.PartSettle = TimeSpan.Zero;
+            Part("Inazuma Eleven/Update v1245184/update.rar", 50);
+            Part("Inazuma Eleven/info.nfo", 1);
+            Part("Kingdom Hearts/Kingdom Hearts [010090C022978000][v0].nsp", 50);
+
+            Assert.That(await _service.ClearLeftoversAsync(_switch), Is.EqualTo(1));
+
+            Assert.That(Directory.Exists(Path.Combine(_switch, "Inazuma Eleven")), Is.False);
+            Assert.That(Directory.Exists(Path.Combine(_switch, "Kingdom Hearts")), Is.True);
+            Assert.That(Directory.EnumerateFiles(Path.Combine(_root, "bin")).Select(Path.GetFileName), Is.EquivalentTo(new[] { "update.rar", "info.nfo" }));
+        }
     }
 }

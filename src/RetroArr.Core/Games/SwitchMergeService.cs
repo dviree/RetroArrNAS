@@ -157,6 +157,7 @@ namespace RetroArr.Core.Games
             var state = LoadState();
             var merged = 0;
             Tidy(library);
+            await ClearLeftoversAsync(library);
             var parts = Scan(library).Concat(Directory.Exists(PartsFolder) ? Scan(PartsFolder) : new List<Part>()).ToList();
             foreach (var family in Plan(parts))
             {
@@ -416,6 +417,34 @@ namespace RetroArr.Core.Games
             }
             foreach (var root in new[] { library, PartsFolder })
                 RemoveEmptyFolders(moved.Where(d => d.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal)), root);
+        }
+
+        /// <summary>
+        /// A folder in roms/switch with no game left in it (an imported archive, an .nfo beside a game that was merged
+        /// or moved out) goes to the trash, so roms/switch keeps only its one file per game. Files written to in the
+        /// last minutes are left for later.
+        /// </summary>
+        internal async Task<int> ClearLeftoversAsync(string library)
+        {
+            var cleared = 0;
+            List<string> folders;
+            try { folders = Directory.EnumerateDirectories(library).Where(d => !Path.GetFileName(d).StartsWith('.')).ToList(); }
+            catch (Exception) { return 0; }
+            foreach (var folder in folders)
+            {
+                try
+                {
+                    var files = Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories).ToList();
+                    if (files.Any(f => Mergeable.Contains(Path.GetExtension(f)))) continue;
+                    if (files.Any(f => DateTime.UtcNow - File.GetLastWriteTimeUtc(f) < PartSettle)) continue;
+                    if (await _trash.MoveAsync(folder, null, Path.GetFileName(folder)) == null) continue;
+                    Note($"leftovers {folder} -> trash");
+                    _logger.Info($"[SwitchMerge] {folder} holds no game any more; it went to the trash");
+                    cleared++;
+                }
+                catch (Exception ex) { _logger.Warn($"[SwitchMerge] Could not clear {folder}: {ex.Message}"); }
+            }
+            return cleared;
         }
 
         // "Tomodachi Life Living the Dream.nsp" -> "Tomodachi Life Living the Dream [0100...0000][v0].nsp"; a name that
