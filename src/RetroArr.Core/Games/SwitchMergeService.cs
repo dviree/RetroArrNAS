@@ -156,6 +156,7 @@ namespace RetroArr.Core.Games
             if (!UsesRust && !File.Exists(Nscb)) return 0;
             var state = LoadState();
             var merged = 0;
+            ReadTitleId = UsesRust ? RustTitleIdReader(KeysFile, NscbRust) : null;
             Tidy(library);
             await ClearLeftoversAsync(library);
             var parts = Scan(library).Concat(Directory.Exists(PartsFolder) ? Scan(PartsFolder) : new List<Part>()).ToList();
@@ -184,6 +185,33 @@ namespace RetroArr.Core.Games
         private static readonly Regex TicketName = new(@"^([0-9A-Fa-f]{16})[0-9A-Fa-f]{16}\.tik$");
 
         /// <summary>The title ID of an NSP from the name of its ticket ("0100ABCD12340000000000000000000A.tik"); null without one.</summary>
+        // Set while nscb_rust is there: the title ID it reads out of a file's own content (CONTENT ID), cached by path
+        // and size so a file is read once
+        internal static Func<string, string?>? ReadTitleId;
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string?> _readIds = new();
+        private static readonly Regex ContentIdLine = new(@"CONTENT ID:\s*([0-9A-Fa-f]{16})");
+
+        private Func<string, string?> RustTitleIdReader(string keys, string rust) => file =>
+        {
+            var key = $"{file}:{new FileInfo(file).Length}";
+            return _readIds.GetOrAdd(key, _ =>
+            {
+                try
+                {
+                    var info = new ProcessStartInfo(rust) { RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true };
+                    foreach (var a in new[] { "--ADVfilelist", file, "--keys", keys }) info.ArgumentList.Add(a);
+                    using var process = Process.Start(info)!;
+                    process.StandardInput.Close();
+                    var output = process.StandardOutput.ReadToEndAsync();
+                    if (!process.WaitForExit(120_000)) { try { process.Kill(true); } catch (Exception) { } return null; }
+                    var id = ContentIdLine.Match(output.Result) is { Success: true } m ? m.Groups[1].Value.ToUpperInvariant() : null;
+                    if (id != null) _logger.Info($"[SwitchMerge] {Path.GetFileName(file)} is {id}, read from its content");
+                    return id;
+                }
+                catch (Exception ex) { _logger.Warn($"[SwitchMerge] Could not read the title ID of {file}: {ex.Message}"); return null; }
+            });
+        };
+
         internal static string? NspTitleId(string file)
         {
             // An NSZ is a PFS0 too, with the same ticket names
@@ -218,7 +246,8 @@ namespace RetroArr.Core.Games
                 if (Path.GetRelativePath(library, file).Split(Path.DirectorySeparatorChar).Any(d => d.StartsWith('.'))) continue;
                 var id = TitleIdRegex.Match(name);
                 // A name without its title ID ("INAZUMA ELEVEN DLC.nsp"): the ticket inside the NSP is named after it
-                var titleId = id.Success ? id.Groups[1].Value : NspTitleId(file);
+                // Neither (a game with no ticket, "Tomodachi Life Living the Dream.nsp"): nscb_rust reads it from the content
+                var titleId = id.Success ? id.Groups[1].Value : NspTitleId(file) ?? ReadTitleId?.Invoke(file);
                 if (titleId == null) continue;
                 var version = VersionRegex.Match(name) is { Success: true } v ? v : LooseVersionRegex.Match(Path.GetFileNameWithoutExtension(name));
                 parts.Add(new Part(file, Convert.ToUInt64(titleId, 16), version.Success ? int.Parse(version.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) : 0,

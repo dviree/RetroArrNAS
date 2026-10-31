@@ -333,5 +333,19 @@ namespace RetroArr.Core.Test.Games
             Assert.That(Directory.Exists(Path.Combine(_switch, "Kingdom Hearts")), Is.True);
             Assert.That(Directory.EnumerateFiles(Path.Combine(_root, "bin")).Select(Path.GetFileName), Is.EquivalentTo(new[] { "update.rar", "info.nfo" }));
         }
+
+        [Test]
+        public void AGameWithNoIdInItsNameOrTicket_IsReadFromItsContent()
+        {
+            var base_ = Part("Tomodachi Life Living the Dream.nsp", 100);
+            Part("Tomodachi Update [0100A6301214E800][v262144].nsp", 10);
+            SwitchMergeService.ReadTitleId = f => f == base_ ? "0100A6301214E000" : null;
+            try
+            {
+                var plan = SwitchMergeService.Plan(SwitchMergeService.Scan(_switch));
+                Assert.That(plan.Single().Base.Path, Is.EqualTo(base_), "the base without an ID joins its update");
+            }
+            finally { SwitchMergeService.ReadTitleId = null; }
+        }
     }
 }
