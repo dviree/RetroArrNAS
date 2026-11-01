@@ -158,6 +158,9 @@ namespace RetroArr.Core.Games
             var merged = 0;
             ReadTitleId = UsesRust ? RustTitleIdReader(KeysFile, NscbRust) : null;
             Tidy(library);
+            foreach (var copy in Duplicates.Where(File.Exists).ToList())
+                if (await _trash.MoveAsync(copy, null, Path.GetFileName(copy)) != null) Note($"copy {copy} -> trash");
+            Duplicates.Clear();
             await ClearLeftoversAsync(library);
             var parts = Scan(library).Concat(Directory.Exists(PartsFolder) ? Scan(PartsFolder) : new List<Part>()).ToList();
             foreach (var family in Plan(parts))
@@ -335,6 +338,13 @@ namespace RetroArr.Core.Games
                 var (verifyCode, verifyLog) = await Run(verifyArgs, work, TimeSpan.FromHours(3), ct);
                 _lastOutput = log + "\n--- verify ---\n" + verifyLog;
                 var verdict = Verdict(verifyLog);
+                // Only the signature check failing is not the merge's doing when a part had no original signature
+                // already (a game with its ticket taken out): its content is still decrypted and hash-checked whole
+                if (verifyCode == 0 && verdict != null && rust && OnlySignature(verifyLog) && await SignatureWasNotOriginalAsync(inputs, work, ct))
+                {
+                    Note($"signature not original before the merge, accepted: {family.Base.Path}");
+                    verdict = null;
+                }
                 if (verifyCode != 0 || verdict != null) return $"verification failed: {verdict ?? $"exit {verifyCode}"}";
 
                 // One file per game, right in roms/switch
@@ -371,6 +381,29 @@ namespace RetroArr.Core.Games
         }
 
         /// <summary>Null when every verdict says the NSP is correct or safe; otherwise the first bad or missing verdict.</summary>
+        private static readonly Regex Tampered = new(@"^VERDICT:\s+\w+\s+FILE\s+COULD'?VE\s+BEEN\s+TAMPERED\s+WITH$", RegexOptions.IgnoreCase);
+
+        /// <summary>The file decrypts and its hashes check out; only its signature is not the original one.</summary>
+        internal static bool OnlySignature(string log)
+        {
+            var verdicts = log.Split('\n').Select(l => l.Trim()).Where(l => l.StartsWith("VERDICT:", StringComparison.OrdinalIgnoreCase)).ToList();
+            var bad = verdicts.Where(v => Verdict(v) != null).ToList();
+            return bad.Count > 0 && bad.All(v => Tampered.IsMatch(v)) && verdicts.Any(v => v.EndsWith("IS CORRECT", StringComparison.OrdinalIgnoreCase));
+        }
+
+        // Whether one of the parts already failed the signature check before it was merged
+        private async Task<bool> SignatureWasNotOriginalAsync(IEnumerable<Part> parts, string work, CancellationToken ct)
+        {
+            foreach (var part in parts)
+            {
+                var list = Path.Combine(work, "verify-part.txt");
+                await File.WriteAllLinesAsync(list, new[] { part.Path }, ct);
+                var (code, log) = await Run(new[] { NscbRust, "-v", part.Path, "--vertype", "lv2", "--text_file", list, "--keys", KeysFile }, work, TimeSpan.FromHours(1), ct);
+                if (code == 0 && log.Split('\n').Any(l => Tampered.IsMatch(l.Trim()))) return true;
+            }
+            return false;
+        }
+
         internal static string? Verdict(string log)
         {
             var verdicts = log.Split('\n').Select(l => l.Trim()).Where(l => l.StartsWith("VERDICT:", StringComparison.OrdinalIgnoreCase)).ToList();
@@ -414,6 +447,9 @@ namespace RetroArr.Core.Games
         /// than one file (or an update or DLC without its base) goes to the parts folder until it is merged. Folders
         /// left empty in roms/switch go. Nothing is deleted; files are only moved, never over another.
         /// </summary>
+        // Copies of a file that is in its place already, found by Tidy and sent to the trash after it
+        internal readonly List<string> Duplicates = new();
+
         internal void Tidy(string library)
         {
             var now = DateTime.UtcNow;
@@ -422,8 +458,9 @@ namespace RetroArr.Core.Games
             var moved = new List<string>();
             foreach (var group in settled.GroupBy(p => p.BaseId))
             {
-                var bases = group.Where(p => p.IsBase).OrderByDescending(p => p.Size).ToList();
-                var single = bases.Count == 1 && group.Count() == 1;
+                // Copies of the same file (same title, version and size) count once: one game, in two places
+                var distinct = group.GroupBy(p => (p.TitleId, p.Version, p.Size)).Select(g => g.First()).ToList();
+                var single = distinct.Count == 1 && distinct[0].IsBase;
                 foreach (var part in group)
                 {
                     var into = single ? library : PartsFolder;
@@ -431,7 +468,13 @@ namespace RetroArr.Core.Games
                     var name = single ? NameFor(part) : Path.GetFileName(part.Path);
                     if (SamePath(Path.GetDirectoryName(part.Path)!, into) && name == Path.GetFileName(part.Path)) continue;
                     var to = Path.Combine(into, name);
-                    if (File.Exists(to)) { _logger.Warn($"[SwitchMerge] {to} is there already; {part.Path} stays where it is"); continue; }
+                    if (File.Exists(to))
+                    {
+                        // The same file there already: this one is a copy and goes to the trash
+                        if (new FileInfo(to).Length == part.Size) Duplicates.Add(part.Path);
+                        else _logger.Warn($"[SwitchMerge] {to} is there already; {part.Path} stays where it is");
+                        continue;
+                    }
                     try
                     {
                         Directory.CreateDirectory(into);
@@ -564,7 +607,8 @@ namespace RetroArr.Core.Games
                     var (code, log) = await Run(new[] { NscbRust, "-v", file, "--vertype", "lv3", "--text_file", list, "--keys", KeysFile }, work, TimeSpan.FromHours(3), ct);
                     var problem = code != 0 ? $"exit {code}: {Tail(log)}" : Verdict(log);
                     state[file] = new Checked(info.Length, info.LastWriteTimeUtc, problem == null, problem ?? "OK", DateTime.UtcNow);
-                    VerifyNote($"{(problem == null ? "OK    " : "BROKEN")} {file}{(problem == null ? "" : ": " + problem)}");
+                    var modified = problem != null && code == 0 && OnlySignature(log);
+                    VerifyNote($"{(problem == null ? "OK    " : modified ? "MODIFIED" : "BROKEN")} {file}{(problem == null ? "" : modified ? ": plays; its signature is not the original one" : ": " + problem)}");
                     if (problem != null) _logger.Warn($"[SwitchVerify] {Path.GetFileName(file)} failed verification: {problem}");
                     count++;
                 }

@@ -347,5 +347,29 @@ namespace RetroArr.Core.Test.Games
             }
             finally { SwitchMergeService.ReadTitleId = null; }
         }
+
+        [Test]
+        public async Task TwoCopiesOfOneGame_LeaveOneInRoms_TheOtherGoesToTheTrash()
+        {
+            SwitchMergeService.PartSettle = TimeSpan.Zero;
+            File.WriteAllText(_service.NscbRust, "");
+            Part("Kingdom Hearts HD 1.5 + 2.5 Remix/Kingdom Hearts HD 1-6 [NSP]/Kingdom Hearts HD 1.5+2.5 Remix [010090C022978000][v0].nsp", 80);
+            var parts = Directory.CreateDirectory(_service.PartsFolder).FullName;
+            File.WriteAllBytes(Path.Combine(parts, "Kingdom Hearts HD 1.5+2.5 Remix [010090C022978000][v0].nsp"), new byte[80]);
+
+            await _service.RunOnceAsync();
+
+            Assert.That(Directory.EnumerateFileSystemEntries(_switch).Select(Path.GetFileName),
+                Is.EqualTo(new[] { "Kingdom Hearts HD 1.5+2.5 Remix [010090C022978000][v0].nsp" }), "one file, no folder");
+            Assert.That(Directory.EnumerateFiles(Path.Combine(_root, "bin")).Count(), Is.EqualTo(1), "the copy");
+        }
+
+        [TestCase("VERDICT: NSP FILE IS CORRECT\nVERDICT: NSP FILE COULD'VE BEEN TAMPERED WITH\nVERDICT: NSP FILE IS CORRECT", true)]
+        [TestCase("VERDICT: NSP FILE IS CORRUPT OR MISSES FILES\nVERDICT: NSP FILE COULD'VE BEEN TAMPERED WITH", false)]
+        [TestCase("VERDICT: NSP FILE IS CORRECT\nVERDICT: NSP FILE IS SAFE", false)]
+        public void OnlyTheSignatureFailing_IsToldApart(string log, bool only)
+        {
+            Assert.That(SwitchMergeService.OnlySignature(log), Is.EqualTo(only));
+        }
     }
 }
