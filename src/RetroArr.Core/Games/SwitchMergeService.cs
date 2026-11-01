@@ -166,21 +166,26 @@ namespace RetroArr.Core.Games
             foreach (var family in Plan(parts))
             {
                 ct.ThrowIfCancellationRequested();
-                if (state.TryGetValue(family.Fingerprint, out var failedAt) && DateTime.UtcNow - failedAt < RetryAfter) continue;
+                // A failure recorded under older merge rules is tried again at once: the rules may take it now
+                if (state.TryGetValue(StateKey(family), out var failedAt) && DateTime.UtcNow - failedAt < RetryAfter) continue;
                 var error = await MergeAsync(family, ct);
-                if (error == null) { merged++; state.Remove(family.Fingerprint); Note($"merged {family.Base.Path}"); }
+                if (error == null) { merged++; state.Remove(StateKey(family)); Note($"merged {family.Base.Path}"); }
                 else
                 {
                     _logger.Warn($"[SwitchMerge] {Path.GetFileName(family.Base.Path)}: {error}");
                     Note($"failed {family.Base.Path}: {error}");
                     KeepOutput(family.Base.Path);
                     LastError = error;
-                    state[family.Fingerprint] = DateTime.UtcNow;
+                    state[StateKey(family)] = DateTime.UtcNow;
                 }
                 SaveState(state);
             }
             return merged;
         }
+
+        // Raised whenever what a merge accepts changes, so failures from before are retried
+        internal const int MergeRules = 2;
+        private static string StateKey(Family family) => $"r{MergeRules}|{family.Fingerprint}";
 
         private static readonly Regex TitleIdRegex = new(@"\[([0-9A-Fa-f]{16})\]");
         private static readonly Regex VersionRegex = new(@"\[v(\d+)\]", RegexOptions.IgnoreCase);
@@ -338,11 +343,12 @@ namespace RetroArr.Core.Games
                 var (verifyCode, verifyLog) = await Run(verifyArgs, work, TimeSpan.FromHours(3), ct);
                 _lastOutput = log + "\n--- verify ---\n" + verifyLog;
                 var verdict = Verdict(verifyLog);
-                // Only the signature check failing is not the merge's doing when a part had no original signature
-                // already (a game with its ticket taken out): its content is still decrypted and hash-checked whole
-                if (verifyCode == 0 && verdict != null && rust && OnlySignature(verifyLog) && await SignatureWasNotOriginalAsync(inputs, work, ct))
+                // Only the signature check failing: the content decrypts and every hash checks out, so the game is whole;
+                // its NCA headers are just not signed by Nintendo any more (a part with its ticket taken out, or the
+                // merge itself rewriting them). It is published, marked MODIFIED, rather than left waiting in the parts folder.
+                if (verifyCode == 0 && verdict != null && rust && OnlySignature(verifyLog))
                 {
-                    Note($"signature not original before the merge, accepted: {family.Base.Path}");
+                    Note($"MODIFIED (signature not original, content verified): {family.Base.Path}");
                     verdict = null;
                 }
                 if (verifyCode != 0 || verdict != null) return $"verification failed: {verdict ?? $"exit {verifyCode}"}";
@@ -389,19 +395,6 @@ namespace RetroArr.Core.Games
             var verdicts = log.Split('\n').Select(l => l.Trim()).Where(l => l.StartsWith("VERDICT:", StringComparison.OrdinalIgnoreCase)).ToList();
             var bad = verdicts.Where(v => Verdict(v) != null).ToList();
             return bad.Count > 0 && bad.All(v => Tampered.IsMatch(v)) && verdicts.Any(v => v.EndsWith("IS CORRECT", StringComparison.OrdinalIgnoreCase));
-        }
-
-        // Whether one of the parts already failed the signature check before it was merged
-        private async Task<bool> SignatureWasNotOriginalAsync(IEnumerable<Part> parts, string work, CancellationToken ct)
-        {
-            foreach (var part in parts)
-            {
-                var list = Path.Combine(work, "verify-part.txt");
-                await File.WriteAllLinesAsync(list, new[] { part.Path }, ct);
-                var (code, log) = await Run(new[] { NscbRust, "-v", part.Path, "--vertype", "lv2", "--text_file", list, "--keys", KeysFile }, work, TimeSpan.FromHours(1), ct);
-                if (code == 0 && log.Split('\n').Any(l => Tampered.IsMatch(l.Trim()))) return true;
-            }
-            return false;
         }
 
         internal static string? Verdict(string log)

@@ -311,6 +311,22 @@ namespace RetroArr.Core.Test.Games
             Assert.That(Directory.Exists(_service.PartsFolder) ? Directory.EnumerateFileSystemEntries(_service.PartsFolder) : Array.Empty<string>(), Is.Empty);
         }
 
+        [Test]
+        public async Task OnlyTheSignatureFailing_IsPublished_AndNothingWaitsInTheParts()
+        {
+            File.WriteAllText(_service.NscbRust, "");
+            SwitchMergeService.PartSettle = TimeSpan.Zero;
+            _verdict = "VERDICT: NSP FILE IS CORRECT\nVERDICT: NSP FILE COULD'VE BEEN TAMPERED WITH";
+            Part("Tomodachi [0100000000020000][v0].nsp", 100);
+            Part("Tomodachi [0100000000020800][v262144].nsp", 30);
+
+            Assert.That(await _service.RunOnceAsync(), Is.EqualTo(1));
+
+            Assert.That(Directory.EnumerateFiles(_switch).Count(), Is.EqualTo(1));
+            Assert.That(Directory.Exists(_service.PartsFolder) ? Directory.EnumerateFileSystemEntries(_service.PartsFolder) : Array.Empty<string>(), Is.Empty);
+            Assert.That(_calls.Count(c => c.Contains("-v")), Is.EqualTo(1), "the parts need no check of their own");
+        }
+
         [TestCase("Tomodachi Life Living the Dream.nsp", 0x0100A6301214E000UL, 0, "Tomodachi Life Living the Dream [0100A6301214E000][v0].nsp")]
         [TestCase("INAZUMA_ELEVEN_Victory_Road_Switch_NSP_Base_Game.nsp", 0x0100B36008F90000UL, 0, "INAZUMA ELEVEN Victory Road [0100B36008F90000][v0].nsp")]
         [TestCase("Zelda [0100F2C0115B6000][v0].nsp", 0x0100F2C0115B6000UL, 0, "Zelda [0100F2C0115B6000][v0].nsp")]
