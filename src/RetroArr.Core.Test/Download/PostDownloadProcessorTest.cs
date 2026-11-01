@@ -592,6 +592,24 @@ namespace RetroArr.Core.Test.Download
         // A new game runs its best file, picked as the targeted import picks it and not the first one listed that says setup
         // or install: an install guide is no game, the settings dialog beside the program is not what runs, and an installer,
         // with its parts or on its own, is marked as one so it gets no Play button
+        [TestCase("Mirrors-Edge-SteamRIP.com", "Mirrors Edge")]
+        [TestCase("Death-Stranding-DC-SteamRIP.com", "Death Stranding DC")]
+        [TestCase("Ni.no.Kuni.Wrath.of.the.White.Witch.Remastered-SteamRIP.com", "Ni no Kuni Wrath of the White Witch Remastered")]
+        public void APcGameWithNoTitleFound_GetsItsReleaseNameWithoutTheRepackTag(string release, string folder)
+        {
+            var root = Path.Combine(Path.GetTempPath(), "retroarr_pdpcname_" + Path.GetRandomFileName());
+            try
+            {
+                SetUpLibrary(root, new MediaSettings());
+                var dbOptions = new DbContextOptionsBuilder<RetroArrDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+                var processor = new PostDownloadProcessor(new ConfigurationService(root), new FileMoverService(),
+                    new SqliteGameRepository(new DbFactory(dbOptions)), new FakeIgdb("x", 0), new ArchiveService(), new TitleCleanerService());
+                Assert.That(processor.PcFolderName(null, release), Is.EqualTo(folder));
+                Assert.That(processor.PcFolderName("Mirror's Edge", release), Is.EqualTo("Mirror's Edge"), "the AI's title first");
+            }
+            finally { Directory.Delete(root, true); }
+        }
+
         [Test]
         public async Task APcRelease_LiesRightInItsTitleFolder_NoReleaseFolderInside()
         {

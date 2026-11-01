@@ -321,8 +321,11 @@ namespace RetroArr.Core.Download
                 }
                 else
                 {
-                    _logger.Info($"[PostDownload] No match found for '{cleanName}'. Using original name.");
-                    containerName = SanitizeFileName(isDirectory ? new DirectoryInfo(download.DownloadPath!).Name : download.Name);
+                    // A PC game is never filed under its release name ("Mirrors-Edge-SteamRIP.com"): the AI's title, else the
+                    // cleaned name
+                    var pcName = platform?.Id == PcPlatformId ? PcFolderName(aiGuess?.Title, download.Name) : null;
+                    _logger.Info($"[PostDownload] No match found for '{cleanName}'. Using {(pcName != null ? $"'{pcName}'" : "original name")}.");
+                    containerName = SanitizeFileName(pcName ?? (isDirectory ? new DirectoryInfo(download.DownloadPath!).Name : download.Name));
                 }
             }
             catch (Exception ex)
@@ -954,6 +957,18 @@ namespace RetroArr.Core.Download
             if (!Directory.Exists(path)) return new List<string>();
             return Directory.EnumerateFiles(path, "*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true })
                 .Take(300).Select(f => Path.GetRelativePath(path, f)).ToList();
+        }
+
+        private static readonly Regex _repackTag = new(@"(?i)[\s._-]*\b(SteamRIP(\.com)?|FitGirl( Repack)?|DODI( Repack)?|ElAmigos|EMPRESS|Razor1911|KaOs|GOG-?Games|SteamUnlocked|Online-?Fix|RUNE|TENOKE|CODEX|FLT|SKIDROW|PLAZA)\b.*$");
+
+        // The folder name for a PC game no title was found for: the AI's title, else the release name without its
+        // repack tag, dots and dashes ("Mirrors-Edge-SteamRIP.com" -> "Mirrors Edge"); null when nothing is left
+        internal string? PcFolderName(string? aiTitle, string releaseName)
+        {
+            if (!string.IsNullOrWhiteSpace(aiTitle)) return aiTitle.Trim();
+            // Only the tag and the separators go: an edition word ("Remastered") is part of the name here
+            var name = Regex.Replace(_repackTag.Replace(releaseName, "").Replace('.', ' ').Replace('-', ' ').Replace('_', ' '), @"\s+", " ").Trim();
+            return name.Length > 0 ? name : null;
         }
 
         internal string CleanReleaseName(string input)
