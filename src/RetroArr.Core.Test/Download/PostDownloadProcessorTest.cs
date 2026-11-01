@@ -592,6 +592,35 @@ namespace RetroArr.Core.Test.Download
         // A new game runs its best file, picked as the targeted import picks it and not the first one listed that says setup
         // or install: an install guide is no game, the settings dialog beside the program is not what runs, and an installer,
         // with its parts or on its own, is marked as one so it gets no Play button
+        [Test]
+        public async Task APcRelease_LiesRightInItsTitleFolder_NoReleaseFolderInside()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "retroarr_pdpc_" + Path.GetRandomFileName());
+            try
+            {
+                var library = SetUpLibrary(root, new MediaSettings());
+                var dbOptions = new DbContextOptionsBuilder<RetroArrDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+                var processor = new PostDownloadProcessor(new ConfigurationService(root), new FileMoverService(),
+                    new SqliteGameRepository(new DbFactory(dbOptions)), new FakeIgdb("Sackboy", 7), new ArchiveService(), new TitleCleanerService());
+                var release = Directory.CreateDirectory(Path.Combine(root, "downloads", "Sackboy-SteamRIP.com", "Sackboy")).Parent!.FullName;
+                File.WriteAllText(Path.Combine(release, "Sackboy", "Sackboy.exe"), "game");
+
+                var result = await processor.ProcessCompletedDownloadAsync(new DownloadStatus
+                {
+                    Id = "x", Name = "Sackboy-SteamRIP.com", PlatformFolder = "windows", DownloadPath = release, State = DownloadState.Completed
+                });
+
+                Assert.That(result.Success, Is.True, result.Reason);
+                var exe = Directory.GetFiles(Path.Combine(library, "pc"), "Sackboy.exe", SearchOption.AllDirectories).Single();
+                Assert.That(Path.GetRelativePath(Path.Combine(library, "pc"), exe), Is.EqualTo(Path.Combine("Sackboy", "Sackboy", "Sackboy.exe")),
+                    "pc/<Title>/<the release's own content>, no Sackboy-SteamRIP.com folder in between");
+            }
+            finally
+            {
+                Directory.Delete(root, true);
+            }
+        }
+
         [TestCase("gba", "Advance Wars", 0, "Install Guide.pdf|Advance Wars.gba", "Advance Wars.gba", false)]
         [TestCase("gba", "Advance Wars", 7, "Install Guide.pdf|Advance Wars.gba", "Advance Wars.gba", false)]
         [TestCase("windows", "Hades", 7, "Game.exe|Setup.exe|uninstall.exe", "Game.exe", false)]

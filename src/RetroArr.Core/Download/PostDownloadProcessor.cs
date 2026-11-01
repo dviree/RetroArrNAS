@@ -244,6 +244,8 @@ namespace RetroArr.Core.Download
             }
         }
 
+        private const int PcPlatformId = 1;
+
         private static readonly string[] ValidExtensions = {
             // Nintendo
             ".nsp", ".nsz", ".xci", ".xcz", ".cia", ".3ds", ".nds", ".gba", ".gbc", ".gb", ".nes", ".sfc", ".smc", ".n64", ".z64", ".v64", ".gcm", ".wbfs", ".wad",
@@ -368,7 +370,9 @@ namespace RetroArr.Core.Download
                     var relativePath = Path.GetRelativePath(download.DownloadPath!, file);
                     string destPath;
                     
-                    if (shouldNest)
+                    // A PC game lies right in its title folder (pc/Sackboy - A Big Adventure/Sackboy/...), never in a
+                    // second folder named for the release inside it
+                    if (shouldNest && platform?.Id != PcPlatformId)
                     {
                         // {gameFolder}/OriginalReleaseName/File
                         destPath = Path.Combine(gameFolder, originalFolderName, relativePath);
