@@ -122,8 +122,8 @@ namespace RetroArr.Core.Test.Download
             Assert.That(result.Success, Is.True, result.Reason);
             Assert.That(Directory.GetFiles(Ps5, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(Ps5, f)),
                 Is.EquivalentTo(new[] { "Ghost of Yotei [PPSA26344] [v1.0].exfat" }), "the game stays as it is");
-            Assert.That(Directory.GetFiles(_importer.BackportRoot).Select(Path.GetFileName),
-                Is.EqualTo(new[] { "Ghost of Yotei [PPSA26344] [DLC LEGENDSPACK00001].pkg" }), "the DLC takes the game's name, in the backport-updates-dlc folder");
+            Assert.That(Directory.GetFiles(Path.Combine(_importer.BackportRoot, "dlc")).Select(Path.GetFileName),
+                Is.EqualTo(new[] { "Ghost of Yotei [PPSA26344] [DLC LEGENDSPACK00001].pkg" }), "the DLC takes the game's name, in backport-updates-dlc/dlc");
             Assert.That(Directory.GetFiles(Ps5), Has.Length.EqualTo(1));
         }
 
@@ -415,7 +415,7 @@ namespace RetroArr.Core.Test.Download
 
             Assert.That(result.Success, Is.True, result.Reason);
             Assert.That(result.Backport, Is.False);
-            Assert.That(File.ReadAllText(Path.Combine(_root, "backport ps5", "Onimusha Way of the Sword PPSA27836", "Backport 4.xx", "fix.pkg")), Is.EqualTo("patched"));
+            Assert.That(File.ReadAllText(Path.Combine(_root, "backport ps5", "backport", "Onimusha Way of the Sword PPSA27836", "Backport 4.xx", "fix.pkg")), Is.EqualTo("patched"));
             Assert.That(File.Exists(Path.Combine(release, "Backport 4.xx", "fix.pkg")), Is.True, "only copied; the source is retired by the caller");
         }
 
@@ -428,7 +428,7 @@ namespace RetroArr.Core.Test.Download
             var result = await _importer.ImportAsync(release, Path.GetFileName(release), _library, "ps5");
 
             Assert.That((result.Success, result.Backport), Is.EqualTo((true, true)), result.Reason);
-            Assert.That(File.Exists(Path.Combine(_root, "backport ps5", "Backport 4.xx PPSA27836", "fix.pkg")), Is.True);
+            Assert.That(File.Exists(Path.Combine(_root, "backport ps5", "backport", "Backport 4.xx PPSA27836", "fix.pkg")), Is.True);
             Assert.That(Directory.Exists(Path.Combine(_library, "ps5")) && Directory.EnumerateFileSystemEntries(Path.Combine(_library, "ps5"), "*", SearchOption.AllDirectories).Any(), Is.False);
         }
 
@@ -443,7 +443,7 @@ namespace RetroArr.Core.Test.Download
             var result = await _importer.ImportAsync(release, Path.GetFileName(release), _library, "ps5");
 
             Assert.That((result.Success, result.Backport), Is.EqualTo((true, true)), result.Reason);
-            Assert.That(File.Exists(Path.Combine(_root, "backport ps5", Path.GetFileName(release), "fakelib", "libc.prx")), Is.True);
+            Assert.That(File.Exists(Path.Combine(_root, "backport ps5", "backport", Path.GetFileName(release), "fakelib", "libc.prx")), Is.True);
         }
 
         [Test]
@@ -475,7 +475,7 @@ namespace RetroArr.Core.Test.Download
             var result = await _importer.ImportAsync(release, Path.GetFileName(release), _library, "ps5");
 
             Assert.That((result.Success, result.Backport), Is.EqualTo((true, true)), result.Reason);
-            Assert.That(File.Exists(Path.Combine(_root, "backport ps5", Path.GetFileName(release), Path.GetFileName(zip))), Is.True);
+            Assert.That(File.Exists(Path.Combine(_root, "backport ps5", "backport", Path.GetFileName(release), Path.GetFileName(zip))), Is.True);
             Assert.That(Directory.Exists(Path.Combine(_library, "ps5")) && Directory.EnumerateFileSystemEntries(Path.Combine(_library, "ps5")).Any(), Is.False);
         }
     }

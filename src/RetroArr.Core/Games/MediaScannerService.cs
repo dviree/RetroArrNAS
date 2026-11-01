@@ -2927,7 +2927,7 @@ namespace RetroArr.Core.Games
                 var pkgFolder = Path.Combine(platformFolder, Download.PlayStationImporter.PkgFolder);
                 // PS5 updates, DLC and backports in their shared folder belong to the game too
                 var dlcFolders = Download.PlayStationImporter.IsPs5(Path.GetFileName(platformFolder))
-                    ? new[] { Download.PlayStationImporter.DefaultExtrasRoot }
+                    ? new[] { Download.PlayStationImporter.DefaultExtrasRoot }.Concat(Download.PlayStationImporter.ExtrasFolders.Select(f => Path.Combine(Download.PlayStationImporter.DefaultExtrasRoot, f)))
                     : Enumerable.Empty<string>();
                 foreach (var folder in new[] { platformFolder, pkgFolder }.Concat(dlcFolders).Where(Directory.Exists))
                     copies.AddRange(Directory.EnumerateFiles(folder).Where(f =>

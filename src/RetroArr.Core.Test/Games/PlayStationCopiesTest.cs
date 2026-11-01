@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using System.Linq;
 using NUnit.Framework;
@@ -43,6 +44,22 @@ namespace RetroArr.Core.Test.Games
             var image = Make("ps5/Saros [PPSA07631].exfat");
 
             Assert.That(MediaScannerService.PlayStationCopies(pkg), Is.EqualTo(new[] { image }));
+        }
+
+        [Test]
+        public void UpdatesAndDlcInTheirOwnFolders_BelongToTheGame()
+        {
+            Environment.SetEnvironmentVariable("PS_BACKPORT_FOLDER", Path.Combine(_root, "backport-updates-dlc"));
+            try
+            {
+                var game = Make("ps5/Onimusha Way of the Sword [PPSA27836]-lz4", folder: true);
+                var update = Make("backport-updates-dlc/updates/Onimusha Way of the Sword [PPSA27836] [Update] [v1.02].pkg");
+                var dlc = Make("backport-updates-dlc/dlc/Onimusha Way of the Sword [PPSA27836] [DLC ABCD000000000001].pkg");
+                Make("backport-updates-dlc/dlc/Stray [PPSA02561] [DLC ABCD000000000002].pkg");
+
+                Assert.That(MediaScannerService.PlayStationCopies(game), Is.EquivalentTo(new[] { update, dlc }));
+            }
+            finally { Environment.SetEnvironmentVariable("PS_BACKPORT_FOLDER", null); }
         }
 
         [Test]

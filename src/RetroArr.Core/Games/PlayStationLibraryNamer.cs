@@ -79,12 +79,14 @@ namespace RetroArr.Core.Games
             foreach (var extra in PlayStationImporter.OtherLibraries) yield return extra;
             // PS5 updates, DLC and backports, outside the library: they get the game's name too
             yield return ExtrasRoot;
+            foreach (var sub in PlayStationImporter.ExtrasFolders) yield return Path.Combine(ExtrasRoot, sub);
         }
 
         /// <summary>Renames what needs a name. Returns the renames made, old path to new path.</summary>
         public async Task<List<(string From, string To)>> RunOnceAsync(CancellationToken ct = default)
         {
             var done = new List<(string, string)>();
+            SortExtras(done);
             foreach (var folder in Folders().Where(Directory.Exists))
             {
                 MovePkgsIntoTheirFolder(folder, done);
@@ -209,6 +211,55 @@ namespace RetroArr.Core.Games
         // Where PS5 update and DLC PKGs go: the folder they share with the backports, outside the library
         internal string ExtrasRoot = PlayStationImporter.DefaultExtrasRoot;
 
+        /// <summary>PS_EXTRAS_SORT=true sorts what lies loose in the extras folder; anything else only writes the plan.</summary>
+        public static bool SortExtrasOn => string.Equals(Environment.GetEnvironmentVariable("PS_EXTRAS_SORT"), "true", StringComparison.OrdinalIgnoreCase);
+
+        internal bool? SortOverride;
+        internal readonly List<string> SortPlan = new();
+
+        // What lies loose in the extras folder from before goes into its three folders: update PKGs into updates/, DLC
+        // PKGs into dlc/, everything else (a backport's release folder or file) into backport/. Never over a file of the
+        // same name. Off unless PS_EXTRAS_SORT=true: then it only writes extras-sort-plan.log.
+        private void SortExtras(List<(string, string)> done)
+        {
+            SortPlan.Clear();
+            if (!Directory.Exists(ExtrasRoot)) return;
+            List<string> loose;
+            try
+            {
+                loose = Directory.EnumerateFileSystemEntries(ExtrasRoot)
+                    .Where(e => Path.GetFileName(e) is var n && !n.StartsWith('.') && !PlayStationImporter.ExtrasFolders.Contains(n, StringComparer.OrdinalIgnoreCase))
+                    .Where(e => !RecentlyWritten(e)).ToList();
+            }
+            catch (Exception) { return; }
+            var sort = SortOverride ?? SortExtrasOn;
+            foreach (var entry in loose)
+            {
+                var into = File.Exists(entry) && entry.EndsWith(".pkg", StringComparison.OrdinalIgnoreCase) && PlayStationImporter.IsUpdateOrDlcPkg(entry)
+                    ? PlayStationImporter.ExtrasFolderFor(ExtrasRoot, entry)
+                    : Path.Combine(ExtrasRoot, PlayStationImporter.BackportFolder);
+                var to = Path.Combine(into, Path.GetFileName(entry));
+                if (File.Exists(to) || Directory.Exists(to)) { SortPlan.Add($"KEEP {entry} ({to} is there already)"); continue; }
+                SortPlan.Add($"MOVE {entry} -> {to}");
+                if (!sort) continue;
+                try
+                {
+                    Directory.CreateDirectory(into);
+                    Rename(entry, to);
+                    done.Add((entry, to));
+                    _logger.Info($"[PSNames] Sorted {Path.GetFileName(entry)} into {into}");
+                }
+                catch (Exception ex) { _logger.Warn($"[PSNames] Could not sort {entry}: {ex.Message}"); }
+            }
+            if (!sort && SortPlan.Count > 0)
+                try
+                {
+                    File.WriteAllLines(Path.Combine(_config.GetConfigDirectory(), "extras-sort-plan.log"), SortPlan);
+                    _logger.Info($"[PSNames] Dry run: {SortPlan.Count} entries in {ExtrasRoot} would be sorted, see extras-sort-plan.log (PS_EXTRAS_SORT=true does it)");
+                }
+                catch (Exception ex) { _logger.Warn($"[PSNames] Could not write the sort plan: {ex.Message}"); }
+        }
+
         // PS5 update and DLC PKGs in roms/ps5/pkg (and its "<Game> [DLC]" folders from before) go to ExtrasRoot
         private void MoveDlcIntoTheirFolder(string ps5, List<(string, string)> done)
         {
@@ -225,15 +276,16 @@ namespace RetroArr.Core.Games
             var left = new HashSet<string>(StringComparer.Ordinal);
             foreach (var pkg in pkgs.Where(p => !RecentlyWritten(p) && PlayStationImporter.IsUpdateOrDlcPkg(p)))
             {
-                var to = Path.Combine(ExtrasRoot, Path.GetFileName(pkg));
+                var into = PlayStationImporter.ExtrasFolderFor(ExtrasRoot, pkg);
+                var to = Path.Combine(into, Path.GetFileName(pkg));
                 if (File.Exists(to)) continue;
                 try
                 {
-                    Directory.CreateDirectory(ExtrasRoot);
+                    Directory.CreateDirectory(into);
                     Rename(pkg, to);
                     done.Add((pkg, to));
                     left.Add(Path.GetDirectoryName(pkg)!);
-                    _logger.Info($"[PSNames] Moved {Path.GetFileName(pkg)} into {ExtrasRoot}");
+                    _logger.Info($"[PSNames] Moved {Path.GetFileName(pkg)} into {into}");
                 }
                 catch (Exception ex) { _logger.Warn($"[PSNames] Could not move {pkg}: {ex.Message}"); }
             }
@@ -254,7 +306,7 @@ namespace RetroArr.Core.Games
             foreach (var pkg in pkgs.Where(p => !RecentlyWritten(p)))
             {
                 var to = PlayStationImporter.IsUpdateOrDlcPkg(pkg)
-                    ? Path.Combine(ExtrasRoot, Path.GetFileName(pkg))
+                    ? Path.Combine(PlayStationImporter.ExtrasFolderFor(ExtrasRoot, pkg), Path.GetFileName(pkg))
                     : Path.Combine(folder, PlayStationImporter.PkgFolder, Path.GetFileName(pkg));
                 if (File.Exists(to)) continue;
                 try

@@ -122,7 +122,9 @@ namespace RetroArr.Core.Test.Games
 
             await _namer.RunOnceAsync();
 
-            Assert.That(Directory.EnumerateFiles(_namer.ExtrasRoot).Select(Path.GetFileName), Is.EquivalentTo(files.Select(Path.GetFileName)));
+            Assert.That(Directory.EnumerateFiles(Path.Combine(_namer.ExtrasRoot, "dlc")).Select(Path.GetFileName), Is.EquivalentTo(files.Take(2).Select(Path.GetFileName)));
+            Assert.That(Directory.EnumerateFiles(Path.Combine(_namer.ExtrasRoot, "updates")).Select(Path.GetFileName), Is.EqualTo(new[] { Path.GetFileName(files[2]) }));
+            Assert.That(Directory.EnumerateFiles(_namer.ExtrasRoot), Is.Empty, "nothing loose in the extras folder");
             Assert.That(File.Exists(game), Is.True, "a game PKG stays in pkg");
             Assert.That(Directory.Exists(oldDlcFolder), Is.False, "the emptied DLC folder goes");
         }
@@ -203,9 +205,37 @@ namespace RetroArr.Core.Test.Games
 
             await _namer.RunOnceAsync();
 
-            Assert.That(File.Exists(Path.Combine(_namer.ExtrasRoot, Path.GetFileName(dlc))), Is.True);
+            Assert.That(File.Exists(Path.Combine(_namer.ExtrasRoot, "dlc", Path.GetFileName(dlc))), Is.True);
             Assert.That(Directory.Exists(Path.Combine(_ps5, "pkg", "dlc")), Is.False);
             Assert.That(Directory.Exists(Path.Combine(_ps5, "pkg")), Is.True);
+        }
+
+        [Test]
+        public async Task WhatLiesLooseInTheExtrasFolder_IsSorted_OnlyWhenSortIsOn()
+        {
+            _namer.ExtrasRoot = Directory.CreateDirectory(Path.Combine(_root, "backport-updates-dlc")).FullName;
+            var update = Path.Combine(_namer.ExtrasRoot, "Onimusha [PPSA27836] [Update] [v1.02].pkg");
+            var dlc = Path.Combine(_namer.ExtrasRoot, "Sackboy A Big Adventure [PPSA01289] [DLC SABAPC0000000001].pkg");
+            var backport = Directory.CreateDirectory(Path.Combine(_namer.ExtrasRoot, "Stray PPSA02100 Backport 4.xx")).FullName;
+            foreach (var f in new[] { update, dlc, Path.Combine(backport, "fix.pkg") })
+            {
+                File.WriteAllText(f, "pkg");
+                File.SetLastWriteTimeUtc(f, DateTime.UtcNow.AddDays(-1));
+            }
+            Directory.SetLastWriteTimeUtc(backport, DateTime.UtcNow.AddDays(-1));
+
+            _namer.SortOverride = false;
+            await _namer.RunOnceAsync();
+            Assert.That(File.Exists(update) && File.Exists(dlc) && Directory.Exists(backport), Is.True, "a dry run moves nothing");
+            Assert.That(_namer.SortPlan, Has.Count.EqualTo(3));
+            Assert.That(Directory.EnumerateFiles(_root, "extras-sort-plan.log", SearchOption.AllDirectories).Count(), Is.EqualTo(1));
+
+            _namer.SortOverride = true;
+            await _namer.RunOnceAsync();
+            Assert.That(File.Exists(Path.Combine(_namer.ExtrasRoot, "updates", Path.GetFileName(update))), Is.True);
+            Assert.That(File.Exists(Path.Combine(_namer.ExtrasRoot, "dlc", Path.GetFileName(dlc))), Is.True);
+            Assert.That(File.Exists(Path.Combine(_namer.ExtrasRoot, "backport", "Stray PPSA02100 Backport 4.xx", "fix.pkg")), Is.True);
+            Assert.That(Directory.EnumerateFileSystemEntries(_namer.ExtrasRoot).Select(Path.GetFileName), Is.EquivalentTo(new[] { "backport", "updates", "dlc" }));
         }
 
         [Test]

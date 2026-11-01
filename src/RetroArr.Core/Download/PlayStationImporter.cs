@@ -67,9 +67,25 @@ namespace RetroArr.Core.Download
 
         /// <summary>
         /// PS5 updates, DLC and backports share one folder outside the library, PS_BACKPORT_FOLDER (default
-        /// /nas/games/backport-updates-dlc): update and DLC PKGs right in it, backports in a folder per release.
+        /// /nas/games/backport-updates-dlc), in three folders: updates/ and dlc/ for the PKGs, backport/ with a folder per release.
         /// </summary>
         internal static string DefaultExtrasRoot => Environment.GetEnvironmentVariable("PS_BACKPORT_FOLDER") ?? "/nas/games/backport-updates-dlc";
+
+        /// <summary>The three folders in it: backports (a folder per release), update PKGs and DLC PKGs.</summary>
+        internal const string BackportFolder = "backport", UpdatesFolder = "updates", DlcFolder = "dlc";
+        internal static readonly string[] ExtrasFolders = { BackportFolder, UpdatesFolder, DlcFolder };
+
+        /// <summary>Where an update or DLC PKG goes in the extras folder: updates/ or dlc/, by its name or else its package.</summary>
+        internal static string ExtrasFolderFor(string root, string pkg)
+        {
+            var name = Path.GetFileName(pkg);
+            if (Regex.IsMatch(name, @"\[Update\b", RegexOptions.IgnoreCase)) return Path.Combine(root, UpdatesFolder);
+            if (Regex.IsMatch(name, @"\[DLC\b", RegexOptions.IgnoreCase)) return Path.Combine(root, DlcFolder);
+            return ExtrasFolderFor(root, PlayStationPackageInspector.Inspect(pkg).Content);
+        }
+
+        internal static string ExtrasFolderFor(string root, PlayStationContent? content) => Path.Combine(root,
+            content == PlayStationContent.Update ? UpdatesFolder : content == PlayStationContent.Dlc ? DlcFolder : BackportFolder);
 
         /// <summary>An update or DLC PKG, by its name ("[Update]", "[DLC ...]") or else by the package itself.</summary>
         internal static bool IsUpdateOrDlcPkg(string pkg)
@@ -150,11 +166,11 @@ namespace RetroArr.Core.Download
         }
 
         // The backports in a release (the release itself, or its "Backport 4.xx" folders and files) copied into
-        // BackportRoot/<release>. Returns what was saved, or an error.
+        // BackportRoot/backport/<release>. Returns what was saved, or an error.
         private (List<string> Saved, string? Error) SaveBackports(string source, string releaseName)
         {
             var saved = new List<string>();
-            var target = Path.Combine(BackportRoot, SafeTitle(releaseName) is { Length: > 0 } t ? t : "Backport");
+            var target = Path.Combine(BackportRoot, BackportFolder, SafeTitle(releaseName) is { Length: > 0 } t ? t : "Backport");
             IEnumerable<string> items;
             if (IsBackport(Path.GetFileName(source)) || IsBackport(releaseName) || IsBackportContent(source)) items = new[] { source };
             else if (Directory.Exists(source))
@@ -167,7 +183,7 @@ namespace RetroArr.Core.Download
             foreach (var item in items)
             {
                 var folder = Directory.Exists(item);
-                // A loose backport file goes into its release's folder too: BackportRoot/<release>/<file>
+                // A loose backport file goes into its release's folder too: BackportRoot/backport/<release>/<file>
                 var to = item == source ? (folder ? target : Path.Combine(target, Path.GetFileName(item))) : Path.Combine(target, Path.GetRelativePath(source, item));
                 if (SizeOf(to) == SizeOf(item)) { saved.Add(to); continue; }
                 Directory.CreateDirectory(folder ? to : Path.GetDirectoryName(to)!);
@@ -218,7 +234,7 @@ namespace RetroArr.Core.Download
             var backportArchives = firsts.Where(f => IsBackport(Path.GetFileName(f))).ToList();
             firsts = firsts.Except(backportArchives).ToList();
             if (firsts.Count == 0 && backportArchives.Count > 0)
-                return new Outcome(true, Path.Combine(BackportRoot, SafeTitle(releaseName)), null, releaseName, VerifyFrom: null, Unpacked: true, Backport: true);
+                return new Outcome(true, Path.Combine(BackportRoot, BackportFolder, SafeTitle(releaseName)), null, releaseName, VerifyFrom: null, Unpacked: true, Backport: true);
             if (firsts.Count == 0) return Outcome.Fail("PlayStation archive: no first volume found");
 
             var needed = all.Where(f => ArchiveFile.IsMatch(f) || Regex.IsMatch(f, @"\.(r\d\d|\d{3})$", RegexOptions.IgnoreCase)).Sum(f => new FileInfo(f).Length);
@@ -305,7 +321,7 @@ namespace RetroArr.Core.Download
             var title = await TitleForAsync(package, source, releaseName, from, platformPath);
             // A PS5 update or DLC goes with the backports, outside the library
             if (package.Format == PlayStationFormat.Pkg && IsPs5(platformFolder) && package.Content is PlayStationContent.Update or PlayStationContent.Dlc)
-                folder = BackportRoot;
+                folder = ExtrasFolderFor(BackportRoot, package.Content);
             // A PS4 PKG goes into its game's folder, with the game's other PKGs: roms/ps4/<Game> [CUSA01234]/
             var ps4Pkg = package.Format == PlayStationFormat.Pkg && !IsPs5(platformFolder) && package.TitleId != null;
             if (ps4Pkg)
