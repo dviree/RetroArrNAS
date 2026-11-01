@@ -139,9 +139,6 @@ namespace RetroArr.Api.V3.DownloadClients
 
             _clients.Remove(client);
             _configService.SaveDownloadClients(_clients);
-            // A client added later can get the same id; it must not find this one's downloads already imported
-            foreach (var tracked in _trackedDownloadService.GetTrackedDownloads().Where(t => t.DownloadClientId == id).ToList())
-                _trackedDownloadService.StopTracking(id, tracked.DownloadId);
             return NoContent();
         }
 
