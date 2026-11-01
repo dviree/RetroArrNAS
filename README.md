@@ -55,7 +55,8 @@ This fork adds what a download-and-sort pipeline on a NAS needs, so no scripts r
 | `PS_PKG_FOLDER` | `pkg` | PS5 PKG folder under `ps5/` |
 | `PS_LIBRARY_EXTRA` | - | Other PS libraries (an LZ4 test library): only renamed, never filled |
 | `PS_BACKPORT_FOLDER` | `/nas/games/backport-updates-dlc` | Where PS5 updates, DLC and backports are kept |
-| `PS_RENAME` | `true` | Rename title-ID-only PS folders |
+| `PS_RENAME` | `true` | Give PS entries that are only a title ID, or a release name, the game's name |
+| `PS4_MERGE` | dry run | `true` merges two roms/ps4 folders of one game into one; otherwise only logged |
 | `PS_HOLD_FILE` | - | A file that pauses PS imports while it exists |
 | `SWITCH_KEYS_FILE` | `/app/config/switch/prod.keys` | Your own keys; merging is off without them |
 | `SWITCH_NSCB_RUST`, `SWITCH_NSCB_RUST_URL` | `/app/config/switch/nscb_rust`, pinned release | The merger and where it is fetched from |

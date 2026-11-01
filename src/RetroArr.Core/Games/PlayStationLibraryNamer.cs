@@ -89,7 +89,7 @@ namespace RetroArr.Core.Games
             {
                 MovePkgsIntoTheirFolder(folder, done);
                 if (_ps5Folders.Contains(folder)) MoveDlcIntoTheirFolder(folder, done);
-                else if (_ps4Folders.Contains(folder)) MovePs4PkgsIntoGameFolders(folder, done);
+                else if (_ps4Folders.Contains(folder)) { MergePs4Duplicates(folder, done); MovePs4PkgsIntoGameFolders(folder, done); }
                 List<string> entries;
                 try { entries = Directory.EnumerateFileSystemEntries(folder).ToList(); }
                 catch (Exception ex) { _logger.Warn($"[PSNames] Cannot read {folder}: {ex.Message}"); continue; }
@@ -143,6 +143,69 @@ namespace RetroArr.Core.Games
             }
         }
 
+        // The title a well-named entry gives this ID ("Stray" from "Stray [PPSA02100] [v1.0].pkg"), never a release name
+        private string LibraryTitle(string id)
+        {
+            var tag = " [" + id + "]";
+            foreach (var folder in Folders().Where(Directory.Exists))
+                foreach (var name in Directory.EnumerateFileSystemEntries(folder).Select(Path.GetFileName))
+                    if (name != null && !name.StartsWith('.') && !NeedsName(name) && name.Contains(tag, StringComparison.OrdinalIgnoreCase)
+                        && !name.Contains("[DLC", StringComparison.OrdinalIgnoreCase) && name[..name.IndexOf(tag, StringComparison.OrdinalIgnoreCase)].Trim() is { Length: > 0 } title)
+                        return title;
+            return string.Empty;
+        }
+
+        /// <summary>PS4_MERGE=true merges two PS4 folders of one game; anything else only logs what it would do.</summary>
+        public static bool MergePs4 => string.Equals(Environment.GetEnvironmentVariable("PS4_MERGE"), "true", StringComparison.OrdinalIgnoreCase);
+
+        internal bool? MergeOverride;
+
+        // Two folders in roms/ps4 for one title ID (two releases of it) become one: what the others hold moves into the
+        // best-named one, never over a file of the same name, and a folder left empty goes. Off unless PS4_MERGE=true.
+        private void MergePs4Duplicates(string ps4, List<(string, string)> done)
+        {
+            List<(string Dir, string Id)> dirs;
+            try
+            {
+                dirs = Directory.EnumerateDirectories(ps4).Where(d => !Path.GetFileName(d).StartsWith('.') && !RecentlyWritten(d))
+                    .Select(d => (d, Ps4IdOf(d))).Where(x => x.Item2.Length > 0).ToList();
+            }
+            catch (Exception) { return; }
+            var merge = MergeOverride ?? MergePs4;
+            foreach (var group in dirs.GroupBy(x => x.Id, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
+            {
+                var ordered = group.Select(x => x.Dir).OrderBy(d => NeedsName(Path.GetFileName(d)) ? 1 : 0).ThenBy(d => d, StringComparer.Ordinal).ToList();
+                var target = ordered[0];
+                foreach (var other in ordered.Skip(1))
+                {
+                    if (!merge) { _logger.Info($"[PSNames] Dry run: would merge {other} into {target} (PS4_MERGE=true does it)"); continue; }
+                    foreach (var item in Directory.EnumerateFileSystemEntries(other).ToList())
+                    {
+                        var to = Path.Combine(target, Path.GetFileName(item));
+                        if (File.Exists(to) || Directory.Exists(to)) { _logger.Info($"[PSNames] {to} is there already, {item} stays"); continue; }
+                        try { Rename(item, to); done.Add((item, to)); }
+                        catch (Exception ex) { _logger.Warn($"[PSNames] Could not move {item}: {ex.Message}"); }
+                    }
+                    try { if (!Directory.EnumerateFileSystemEntries(other).Any()) Directory.Delete(other); } catch (Exception) { }
+                    _logger.Info($"[PSNames] Merged {other} into {target}");
+                }
+            }
+        }
+
+        // The title ID of a PS4 game folder: in its name, else of a PKG right in it
+        private static string Ps4IdOf(string dir)
+        {
+            if (PlayStationPackageInspector.TitleIdIn(Path.GetFileName(dir)) is { Length: > 0 } id) return id.ToUpperInvariant();
+            try
+            {
+                foreach (var pkg in Directory.EnumerateFiles(dir, "*.pkg"))
+                    if ((PlayStationPackageInspector.TitleIdIn(Path.GetFileName(pkg)) is { Length: > 0 } fromName ? fromName : PlayStationPackageInspector.Inspect(pkg).TitleId) is { Length: > 0 } found)
+                        return found.ToUpperInvariant();
+            }
+            catch (Exception) { }
+            return string.Empty;
+        }
+
         // Where PS5 update and DLC PKGs go: the folder they share with the backports, outside the library
         internal string ExtrasRoot = PlayStationImporter.DefaultExtrasRoot;
 
@@ -154,9 +217,9 @@ namespace RetroArr.Core.Games
             List<string> pkgs;
             try
             {
-                pkgs = Directory.EnumerateFiles(pkgFolder, "*.pkg")
-                    .Concat(Directory.EnumerateDirectories(pkgFolder).Where(d => d.EndsWith(" [DLC]", StringComparison.OrdinalIgnoreCase)).SelectMany(d => Directory.EnumerateFiles(d, "*.pkg")))
-                    .Where(f => !Path.GetFileName(f).StartsWith('.')).ToList();
+                // Any depth: the old layouts had pkg/<Game> [DLC]/ and pkg/dlc/<Game> [DLC]/
+                pkgs = Directory.EnumerateFiles(pkgFolder, "*.pkg", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true })
+                    .Where(f => !Path.GetRelativePath(pkgFolder, f).Split(Path.DirectorySeparatorChar).Any(p => p.StartsWith('.'))).ToList();
             }
             catch (Exception) { return; }
             var left = new HashSet<string>(StringComparer.Ordinal);
@@ -174,9 +237,10 @@ namespace RetroArr.Core.Games
                 }
                 catch (Exception ex) { _logger.Warn($"[PSNames] Could not move {pkg}: {ex.Message}"); }
             }
-            // A "<Game> [DLC]" folder left empty goes
-            foreach (var dir in left.Where(d => !string.Equals(d, pkgFolder, StringComparison.Ordinal)))
-                try { if (!Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir); } catch (Exception) { }
+            // A folder this left empty goes, and so do its parents up to pkg ("dlc/<Game> [DLC]")
+            foreach (var start in left)
+                for (var dir = start; !string.Equals(dir, pkgFolder, StringComparison.Ordinal) && dir.StartsWith(pkgFolder + Path.DirectorySeparatorChar, StringComparison.Ordinal); dir = Path.GetDirectoryName(dir)!)
+                    try { if (Directory.EnumerateFileSystemEntries(dir).Any()) break; Directory.Delete(dir); } catch (Exception) { break; }
         }
 
         // Loose PKGs in roms/ps5 go into roms/ps5/pkg, under the same name
@@ -204,12 +268,24 @@ namespace RetroArr.Core.Games
             }
         }
 
-        /// <summary>A name that is nothing but a title ID and format words: "PPSA26344-app0-lz4", "_PPSA03671_", "CUSA00900.pkg".</summary>
+        // The tags a name of ours carries: [PPSA01234], [v1.2], [Update], [DLC ABCD0000000001]
+        private static readonly Regex OurTag = new(@"^\[(?:(?:PPSA|CUSA|ECAS)\d{5}|v\d+(?:\.\d+)*|Update|DLC(?: [A-Za-z0-9]+)?)\]$", RegexOptions.IgnoreCase);
+
+        /// <summary>
+        /// A name with a title ID that is not one of ours: nothing but the ID and format words ("PPSA26344-app0-lz4",
+        /// "CUSA00900.pkg"), or a release name ("261028 - Stray [PPSA02100] [VIKINGFILE].pkg",
+        /// "Ghostbusters.Remastered_CUSA15558_v1.00_[6.72]_GROUP"). Backports keep their release name.
+        /// </summary>
         internal static bool NeedsName(string name)
         {
             if (PlayStationPackageInspector.TitleIdIn(name).Length == 0) return false;
             var stem = Regex.Replace(name, @"\.(exfat|ffpfsc|pkg)$", "", RegexOptions.IgnoreCase);
-            return PlayStationImporter.CleanReleaseName(stem).Length == 0;
+            if (PlayStationImporter.CleanReleaseName(stem).Length == 0) return true;
+            if (PlayStationImporter.IsBackport(stem)) return false;
+            stem = Regex.Replace(stem, @"[-_ ]lz4$", "", RegexOptions.IgnoreCase);
+            if (Regex.IsMatch(stem, @"^\d{6}\s*-")) return true;
+            if (!Regex.IsMatch(stem, @"\[(?:PPSA|CUSA|ECAS)\d{5}\]", RegexOptions.IgnoreCase)) return true;
+            return Regex.Matches(stem, @"\[[^\]]*\]").Any(m => !OurTag.IsMatch(m.Value));
         }
 
         private static bool RecentlyWritten(string entry)
@@ -233,12 +309,18 @@ namespace RetroArr.Core.Games
             var id = package.TitleId ?? NullIfEmpty(PlayStationPackageInspector.TitleIdIn(name));
             if (id == null) return null;
             var title = PlayStationImporter.SafeTitle(package.Title);
+            // Else the name the library gives that game already, the AI's, or the title in the release name
+            if (title.Length == 0) title = LibraryTitle(id);
             if (title.Length == 0 && _ai is { IsEnabled: true })
             {
                 var guess = await _ai.IdentifyAsync(name + " " + id, new[] { name });
                 if (guess != null && PlayStationImporter.IsPlayStation(guess.Platform)) title = PlayStationImporter.SafeTitle(guess.Title);
             }
+            if (title.Length == 0) title = PlayStationImporter.CleanReleaseName(Regex.Replace(name, @"\.(exfat|ffpfsc|pkg)$", "", RegexOptions.IgnoreCase));
             if (title.Length == 0) return null;
+            // A PS4 game folder holds every PKG of the game: "<Game> [CUSA01234]", no version
+            if (Directory.Exists(entry) && _ps4Folders.Contains(Path.GetDirectoryName(entry)!))
+                return PlayStationImporter.SafeTitle(title) + " [" + id + "]";
             var extension = File.Exists(entry) ? Path.GetExtension(name).ToLowerInvariant() : string.Empty;
             var suffix = Regex.IsMatch(name, @"(?i)[-_ ]lz4$") ? "-lz4" : string.Empty;
             var version = package.Version ?? PlayStationImporter.VersionInName(name);

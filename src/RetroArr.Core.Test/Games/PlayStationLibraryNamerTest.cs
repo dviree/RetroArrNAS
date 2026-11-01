@@ -60,6 +60,12 @@ namespace RetroArr.Core.Test.Games
         [TestCase("CUSA00900.pkg", true)]
         [TestCase("FINAL FANTASY VII REMAKE [PPSA01903] [v1.5]-lz4", false)]
         [TestCase("Some Game", false)]
+        [TestCase("261028 - Stray [PPSA02100] [VIKINGFILE].pkg", true)]
+        [TestCase("Ghostbusters.The.Video.Game.Remastered_CUSA15558_v1.00_[6.72]_GROUP", true)]
+        [TestCase("Ghostbusters The Video Game Remastered [CUSA15558]", false)]
+        [TestCase("Sackboy A Big Adventure [PPSA01289] [DLC SABAPC0000000001].pkg", false)]
+        [TestCase("Onimusha [PPSA27836] [Update] [v1.02].pkg", false)]
+        [TestCase("Stray PPSA02100 Backport 4.xx", false)]
         public void OnlyNamesThatAreJustATitleId_NeedAName(string name, bool needs)
         {
             Assert.That(PlayStationLibraryNamer.NeedsName(name), Is.EqualTo(needs));
@@ -145,6 +151,61 @@ namespace RetroArr.Core.Test.Games
             Assert.That(Directory.EnumerateFiles(Path.Combine(ps4, "Bloodborne [CUSA00900]")).Count(), Is.EqualTo(2), "base and DLC together");
             Assert.That(Directory.EnumerateFiles(existing).Count(), Is.EqualTo(2), "the update joins the folder the game is in already");
             Assert.That(Directory.Exists(Path.Combine(ps4, "pkg")), Is.False);
+        }
+
+        [Test]
+        public async Task ReleaseNames_GetTheGamesName_FromTheirOwnTitle()
+        {
+            var pkgFolder = Directory.CreateDirectory(Path.Combine(_ps5, "pkg")).FullName;
+            var stray = Path.Combine(pkgFolder, "261028 - Stray [PPSA02100] [VIKINGFILE].pkg");
+            File.WriteAllText(stray, "pkg");
+            File.SetLastWriteTimeUtc(stray, DateTime.UtcNow.AddDays(-1));
+
+            await _namer.RunOnceAsync();
+
+            Assert.That(Directory.EnumerateFiles(pkgFolder).Select(Path.GetFileName), Is.EqualTo(new[] { "Stray [PPSA02100].pkg" }));
+        }
+
+        [Test]
+        public async Task TwoPs4FoldersOfOneGame_BecomeOne_OnlyWhenMergeIsOn()
+        {
+            var ps4 = Directory.CreateDirectory(_namer.Folders().First(f => f.EndsWith("ps4", StringComparison.Ordinal))).FullName;
+            var a = Directory.CreateDirectory(Path.Combine(ps4, "261012 - Ghostbusters - The Video Game Remastered [CUSA15558] [1FICHIER]")).FullName;
+            var b = Directory.CreateDirectory(Path.Combine(ps4, "Ghostbusters.The.Video.Game.Remastered_CUSA15558_v1.00_[6.72]_GROUP")).FullName;
+            foreach (var f in new[] { Path.Combine(a, "base.pkg"), Path.Combine(b, "update.pkg"), Path.Combine(b, "base.pkg") })
+            {
+                File.WriteAllText(f, "pkg");
+                File.SetLastWriteTimeUtc(f, DateTime.UtcNow.AddDays(-1));
+            }
+
+            _namer.MergeOverride = false;
+            await _namer.RunOnceAsync();
+            Assert.That(Directory.EnumerateDirectories(ps4).Count(), Is.EqualTo(2), "a dry run merges nothing");
+
+            _namer.MergeOverride = true;
+            await _namer.RunOnceAsync();
+
+            var game = Path.Combine(ps4, "Ghostbusters - The Video Game Remastered [CUSA15558]");
+            var dirs = Directory.EnumerateDirectories(ps4).Select(Path.GetFileName).ToList();
+            Assert.That(dirs, Does.Contain(Path.GetFileName(game)));
+            Assert.That(Directory.EnumerateFiles(game).Select(Path.GetFileName), Is.EquivalentTo(new[] { "base.pkg", "update.pkg" }));
+            Assert.That(dirs, Has.Count.EqualTo(2), "the folder whose base.pkg was there already stays, with only that file");
+        }
+
+        [Test]
+        public async Task TheOldDlcFolderInPkg_IsEmptiedIntoTheExtrasFolder()
+        {
+            _namer.ExtrasRoot = Path.Combine(_root, "backport-updates-dlc");
+            var deep = Directory.CreateDirectory(Path.Combine(_ps5, "pkg", "dlc", "Sackboy A Big Adventure [DLC]")).FullName;
+            var dlc = Path.Combine(deep, "Sackboy A Big Adventure [PPSA01289] [DLC SABAPC0000000001].pkg");
+            File.WriteAllText(dlc, "pkg");
+            File.SetLastWriteTimeUtc(dlc, DateTime.UtcNow.AddDays(-1));
+
+            await _namer.RunOnceAsync();
+
+            Assert.That(File.Exists(Path.Combine(_namer.ExtrasRoot, Path.GetFileName(dlc))), Is.True);
+            Assert.That(Directory.Exists(Path.Combine(_ps5, "pkg", "dlc")), Is.False);
+            Assert.That(Directory.Exists(Path.Combine(_ps5, "pkg")), Is.True);
         }
 
         [Test]

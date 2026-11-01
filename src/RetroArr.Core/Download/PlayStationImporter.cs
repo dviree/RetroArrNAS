@@ -89,7 +89,7 @@ namespace RetroArr.Core.Download
             if (Directory.Exists(ps4))
                 foreach (var dir in Directory.EnumerateDirectories(ps4).Where(d => !Path.GetFileName(d).StartsWith('.')))
                 {
-                    if (Path.GetFileName(dir).Contains(tag, StringComparison.OrdinalIgnoreCase)) return dir;
+                    if (PlayStationPackageInspector.TitleIdIn(Path.GetFileName(dir)).Equals(titleId, StringComparison.OrdinalIgnoreCase)) return dir;
                     try
                     {
                         if (Directory.EnumerateFiles(dir, "*.pkg").Any(f => (PlayStationPackageInspector.TitleIdIn(Path.GetFileName(f)) is { Length: > 0 } id
@@ -129,7 +129,9 @@ namespace RetroArr.Core.Download
         /// <summary>Backports (PKGs patched for older PS5 firmware) are kept apart there too, one folder per release.</summary>
         internal string BackportRoot = DefaultExtrasRoot;
 
-        internal static bool IsBackport(string name) => name.Contains("backport", StringComparison.OrdinalIgnoreCase);
+        // "Backport 4.xx", or the short "BP-10.xx" / "BP_7.xx"
+        internal static bool IsBackport(string name) =>
+            name.Contains("backport", StringComparison.OrdinalIgnoreCase) || Regex.IsMatch(name, @"(?<![A-Za-z0-9])BP[-_ ]?\d", RegexOptions.IgnoreCase);
 
         // A release that is a backport by what it holds, whatever its name ("[DLPSGAME]"): a fakelib folder (the
         // libraries a backport brings for older firmware) and no game data, so a few GB at most. A whole game with a
@@ -584,6 +586,8 @@ namespace RetroArr.Core.Download
             var s = name ?? string.Empty;
             foreach (var noise in ReleaseNoise) s = noise.Replace(s, " ");
             if (!s.Trim().Contains(' ')) s = s.Replace('.', ' ').Replace('_', ' ');
+            // A dotted release name the ID was cut out of ("Ghostbusters.The.Game_ _v1.00"): the dots between words go
+            else if (!s.Contains(". ") && !(name ?? string.Empty).Contains(' ')) s = Regex.Replace(s, @"(?<=[A-Za-z0-9])\.(?=[A-Za-z])", " ");
             s = s.Replace('_', ' ');
             s = ReleaseTail.Replace(s, "");
             s = Regex.Replace(s, @"-[A-Za-z0-9]+$", m => m.Value.Skip(1).All(c => char.IsUpper(c) || char.IsDigit(c)) ? "" : m.Value);

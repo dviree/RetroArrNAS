@@ -344,6 +344,16 @@ namespace RetroArr.Core.Test.Download
             Assert.That(Directory.GetFiles(Ps5), Has.Length.EqualTo(1));
         }
 
+        [TestCase("[DLPSGAME.COM]-BP-10.xx-PPSA26344-app0_Pro.zip", true)]
+        [TestCase("Stray Backport 4.xx", true)]
+        [TestCase("BP_7.xx Fix", true)]
+        [TestCase("BPM Racer [PPSA01234]", false)]
+        [TestCase("Ghost of Yotei [PPSA26344]", false)]
+        public void Backports_AreKnownByName(string name, bool backport)
+        {
+            Assert.That(PlayStationImporter.IsBackport(name), Is.EqualTo(backport));
+        }
+
         [TestCase("PPSA02100", "ps5")]
         [TestCase("ECAS00001", "ps5")]
         [TestCase("CUSA00900", "ps4")]
@@ -358,6 +368,7 @@ namespace RetroArr.Core.Test.Download
         [TestCase("Marvels_Spider-Man_2_PPSA03016_v1.002", "Marvels Spider-Man 2")]
         [TestCase("Black Myth Wukong PPSA23226-app0", "Black Myth Wukong")]
         [TestCase("UP9000-PPSA26344_00-GHOST2SHIP000000", "")]
+        [TestCase("Ghostbusters.The.Video.Game.Remastered_CUSA15558_v1.00_[6.72]_GROUP", "Ghostbusters The Video Game Remastered")]
         public void ReleaseNames_AreCleaned(string name, string title)
         {
             Assert.That(PlayStationImporter.CleanReleaseName(name), Is.EqualTo(title));
