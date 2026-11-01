@@ -121,7 +121,7 @@ namespace RetroArr.Api.V3.Games
         [HttpGet("problems")]
         public async Task<ActionResult<IEnumerable<object>>> GetProblems()
         {
-            var games = await _repository.GetAllAsync();
+            var games = await _repository.GetProblemRowsAsync();
             var problems = new List<object>();
             
             // Define invalid file extensions (media files that shouldn't be games)
@@ -135,6 +135,8 @@ namespace RetroArr.Api.V3.Games
 
             foreach (var game in games)
             {
+                if (game.ProblemResolvedAt != null) continue;
+
                 string? problemType = null;
                 string? problemDescription = null;
                 string? fileExtension = null;
@@ -149,11 +151,8 @@ namespace RetroArr.Api.V3.Games
                         problemDescription = $"File has invalid extension '{ext}' - this is not a valid game file.";
                         fileExtension = ext;
                     }
-                    else if (!System.IO.File.Exists(game.Path) && !System.IO.Directory.Exists(game.Path))
-                    {
-                        problemType = "missing_file";
-                        problemDescription = "The game file or folder no longer exists at the specified path.";
-                    }
+                    // What the last library scan found: checking every path here is too slow for a big
+                    // library on spinning disks, and reports a whole unmounted share as missing
                     else if (game.MissingSince != null)
                     {
                         problemType = "missing_file";
@@ -162,7 +161,7 @@ namespace RetroArr.Api.V3.Games
                 }
 
                 // Check for missing metadata
-                if (problemType == null && !game.IgdbId.HasValue && string.IsNullOrEmpty(game.Overview))
+                if (problemType == null && game.NoMetadata)
                 {
                     problemType = "no_metadata";
                     problemDescription = "Game has no IGDB ID and no description. Consider running metadata correction.";
@@ -193,12 +192,18 @@ namespace RetroArr.Api.V3.Games
         [HttpPost("{id}/resolve-problem")]
         public async Task<ActionResult> ResolveProblem(int id)
         {
-            // This endpoint marks a problem as resolved by the user
-            // For now, it just returns OK - could be extended to track resolved issues
-            var game = await _repository.GetByIdAsync(id);
+            var game = await _repository.UpdateFieldsAsync(id, g => g.ProblemResolvedAt = DateTime.UtcNow);
             if (game == null) return NotFound();
-            
+
             return Ok(new { message = "Problem marked as resolved" });
+        }
+
+        // Removes the games from the library in one go, their files stay where they are
+        [HttpPost("delete")]
+        public async Task<ActionResult> DeleteMany([FromBody] List<int>? ids)
+        {
+            if (ids == null || ids.Count == 0) return BadRequest(new { message = "No games given." });
+            return Ok(new { deleted = await _repository.DeleteManyAsync(ids) });
         }
 
         // setup.exe, GOG's setup_game_1.0_(123).exe, install*.exe, GameSetup.exe

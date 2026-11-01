@@ -37,6 +37,8 @@ namespace RetroArr.Core.Cache
                 TimeSpan.FromSeconds(_settings.LibraryListTtlSeconds));
         }
 
+        public Task<List<GameProblemRow>> GetProblemRowsAsync() => _inner.GetProblemRowsAsync();
+
         public Task<PagedResult<GameListDto>> GetAllPagedAsync(int page, int pageSize, int? platformId = null, string? search = null, string sortOrder = "asc", bool? missingOnly = null, string? protonDbTier = null)
             => _inner.GetAllPagedAsync(page, pageSize, platformId, search, sortOrder, missingOnly, protonDbTier);
 
@@ -84,6 +86,13 @@ namespace RetroArr.Core.Cache
                 await InvalidateListCaches();
             }
             return result;
+        }
+
+        public async Task<List<int>> DeleteManyAsync(IReadOnlyCollection<int> gameIds)
+        {
+            var deleted = await _inner.DeleteManyAsync(gameIds);
+            if (deleted.Count > 0) await InvalidateAllGameCaches();
+            return deleted;
         }
 
         public async Task<int> DeleteSteamGamesAsync()

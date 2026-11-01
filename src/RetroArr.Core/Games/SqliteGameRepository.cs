@@ -21,14 +21,33 @@ namespace RetroArr.Core.Games
         {
             using var context = await _contextFactory.CreateDbContextAsync();
             return await context.Games
+                .AsNoTracking()
                 .Include(g => g.GameFiles)
                 .ToListAsync();
         }
 
+        // Untracked: the context is gone on return, and tracking a big library costs seconds
         public async Task<List<Game>> GetAllLightAsync()
         {
             using var context = await _contextFactory.CreateDbContextAsync();
-            return await context.Games.ToListAsync();
+            return await context.Games.AsNoTracking().ToListAsync();
+        }
+
+        public async Task<List<GameProblemRow>> GetProblemRowsAsync()
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+            return await context.Games.AsNoTracking()
+                .Select(g => new GameProblemRow
+                {
+                    Id = g.Id,
+                    Title = g.Title,
+                    Path = g.Path,
+                    PlatformId = g.PlatformId,
+                    MissingSince = g.MissingSince,
+                    ProblemResolvedAt = g.ProblemResolvedAt,
+                    NoMetadata = g.IgdbId == null && (g.Overview == null || g.Overview.Length == 0)
+                })
+                .ToListAsync();
         }
 
         public async Task<PagedResult<GameListDto>> GetAllPagedAsync(int page, int pageSize, int? platformId = null, string? search = null, string sortOrder = "asc", bool? missingOnly = null, string? protonDbTier = null)
@@ -163,7 +182,10 @@ namespace RetroArr.Core.Games
             var existing = await context.Games.FindAsync(id);
             if (existing == null) return null;
 
+            // Only resolve-problem and a new loss set it, never a copy loaded before the click
+            var resolved = existing.ProblemResolvedAt;
             context.Entry(existing).CurrentValues.SetValues(game);
+            existing.ProblemResolvedAt = resolved;
             existing.Genres = game.Genres;
 
             // SetValues copies Game's own properties, not the owned GameImages
@@ -242,6 +264,17 @@ namespace RetroArr.Core.Games
             context.Games.Remove(game);
             await context.SaveChangesAsync();
             return true;
+        }
+
+        public async Task<List<int>> DeleteManyAsync(IReadOnlyCollection<int> gameIds)
+        {
+            if (gameIds.Count == 0) return new List<int>();
+            var ids = gameIds.Distinct().ToList();
+            using var context = await _contextFactory.CreateDbContextAsync();
+            var rows = context.Games.Where(g => ids.Contains(g.Id));
+            var found = await rows.Select(g => g.Id).ToListAsync();
+            await rows.ExecuteDeleteAsync();
+            return found;
         }
 
         public async Task<int> DeleteSteamGamesAsync()

@@ -19,6 +19,9 @@ interface ProblemGame {
   detectedAt: string;
 }
 
+// Thousands of rows at once freeze the page for many seconds
+const PAGE_SIZE = 200;
+
 const Problems: React.FC = () => {
   const [problems, setProblems] = useState<ProblemGame[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,6 +29,13 @@ const Problems: React.FC = () => {
   const [filter, setFilter] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedProblems, setSelectedProblems] = useState<Set<number>>(new Set());
+  const [shown, setShown] = useState(PAGE_SIZE);
+
+  // A selection made under another filter or search is not on screen any more
+  useEffect(() => {
+    setSelectedProblems(new Set());
+    setShown(PAGE_SIZE);
+  }, [filter, searchTerm]);
 
   useEffect(() => {
     loadProblems();
@@ -60,18 +70,20 @@ const Problems: React.FC = () => {
   };
 
   const handleRemoveSelected = async () => {
-    if (selectedProblems.size === 0) return;
-    if (!window.confirm(`Remove ${selectedProblems.size} selected games?`)) return;
-    
-    for (const id of selectedProblems) {
-      try {
-        await apiClient.delete(`/game/${id}`);
-      } catch (err) {
-        console.error(`Failed to remove game ${id}:`, err);
-      }
+    const ids = selectedVisible.map(p => p.id);
+    if (ids.length === 0) return;
+    if (!window.confirm(`Remove ${ids.length} selected games?`)) return;
+
+    try {
+      // Ids the server didn't find were gone already
+      await apiClient.post('/game/delete', ids);
+      const gone = new Set(ids);
+      setProblems(prev => prev.filter(p => !gone.has(p.id)));
+      setSelectedProblems(new Set());
+      setError(null);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Failed to remove the selected games'));
     }
-    setProblems(prev => prev.filter(p => !selectedProblems.has(p.id)));
-    setSelectedProblems(new Set());
   };
 
   const handleMarkResolved = async (id: number) => {
@@ -95,11 +107,12 @@ const Problems: React.FC = () => {
     });
   };
 
+  // Only the rows on screen, so a bulk remove never takes games the user has not seen
   const selectAll = () => {
-    if (selectedProblems.size === filteredProblems.length) {
+    if (selectedVisible.length === visibleProblems.length) {
       setSelectedProblems(new Set());
     } else {
-      setSelectedProblems(new Set(filteredProblems.map(p => p.id)));
+      setSelectedProblems(new Set(visibleProblems.map(p => p.id)));
     }
   };
 
@@ -134,6 +147,8 @@ const Problems: React.FC = () => {
       (p.fileExtension?.toLowerCase().includes(search) ?? false)
     );
   });
+  const visibleProblems = filteredProblems.slice(0, shown);
+  const selectedVisible = visibleProblems.filter(p => selectedProblems.has(p.id));
 
   const problemCounts = {
     all: problems.length,
@@ -167,10 +182,10 @@ const Problems: React.FC = () => {
             <FontAwesomeIcon icon={faRefresh} />
             Refresh
           </button>
-          {selectedProblems.size > 0 && (
+          {selectedVisible.length > 0 && (
             <button className="btn-remove-selected" onClick={handleRemoveSelected}>
               <FontAwesomeIcon icon={faTrash} />
-              Remove Selected ({selectedProblems.size})
+              Remove Selected ({selectedVisible.length})
             </button>
           )}
         </div>
@@ -241,13 +256,13 @@ const Problems: React.FC = () => {
             <label className="select-all">
               <input 
                 type="checkbox" 
-                checked={selectedProblems.size === filteredProblems.length && filteredProblems.length > 0}
+                checked={selectedVisible.length === visibleProblems.length && visibleProblems.length > 0}
                 onChange={selectAll}
               />
               Select All
             </label>
           </div>
-          {filteredProblems.map(problem => (
+          {visibleProblems.map(problem => (
             <div 
               key={problem.id} 
               className={`problem-item ${selectedProblems.has(problem.id) ? 'selected' : ''}`}
@@ -310,6 +325,11 @@ const Problems: React.FC = () => {
               </div>
             </div>
           ))}
+          {filteredProblems.length > shown && (
+            <button className="btn-show-more" onClick={() => setShown(n => n + PAGE_SIZE)}>
+              Show more ({filteredProblems.length - shown} left)
+            </button>
+          )}
         </div>
       )}
     </div>
