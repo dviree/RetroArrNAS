@@ -93,7 +93,8 @@ namespace RetroArr.Core.Games
                 if (_ps5Folders.Contains(folder)) MoveDlcIntoTheirFolder(folder, done);
                 else if (_ps4Folders.Contains(folder)) { MergePs4Duplicates(folder, done); MovePs4PkgsIntoGameFolders(folder, done); }
                 List<string> entries;
-                try { entries = Directory.EnumerateFileSystemEntries(folder).ToList(); }
+                // In name order, so a run does the same on every file system
+                try { entries = Directory.EnumerateFileSystemEntries(folder).OrderBy(e => e, StringComparer.Ordinal).ToList(); }
                 catch (Exception ex) { _logger.Warn($"[PSNames] Cannot read {folder}: {ex.Message}"); continue; }
                 foreach (var entry in entries)
                 {
@@ -102,6 +103,8 @@ namespace RetroArr.Core.Games
                     if (name.StartsWith('.')) continue;
                     // A converter may still be at work on what changed lately
                     if (!NeedsName(name) || RecentlyWritten(entry)) continue;
+                    // A second folder of a PS4 game keeps its name: the game's name is the folder it is merged into
+                    if (_otherCopies.Contains(entry)) continue;
                     var target = await NewNameAsync(entry);
                     if (target == null || target == name) continue;
                     var to = Path.Combine(folder, target);
@@ -162,6 +165,9 @@ namespace RetroArr.Core.Games
 
         internal bool? MergeOverride;
 
+        // PS4 folders of a game that holds another folder too, left after a merge or in a dry run
+        private readonly HashSet<string> _otherCopies = new(StringComparer.Ordinal);
+
         // Two folders in roms/ps4 for one title ID (two releases of it) become one: what the others hold moves into the
         // best-named one, never over a file of the same name, and a folder left empty goes. Off unless PS4_MERGE=true.
         private void MergePs4Duplicates(string ps4, List<(string, string)> done)
@@ -174,13 +180,14 @@ namespace RetroArr.Core.Games
             }
             catch (Exception) { return; }
             var merge = MergeOverride ?? MergePs4;
+            _otherCopies.Clear();
             foreach (var group in dirs.GroupBy(x => x.Id, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
             {
                 var ordered = group.Select(x => x.Dir).OrderBy(d => NeedsName(Path.GetFileName(d)) ? 1 : 0).ThenBy(d => d, StringComparer.Ordinal).ToList();
                 var target = ordered[0];
                 foreach (var other in ordered.Skip(1))
                 {
-                    if (!merge) { _logger.Info($"[PSNames] Dry run: would merge {other} into {target} (PS4_MERGE=true does it)"); continue; }
+                    if (!merge) { _otherCopies.Add(other); _logger.Info($"[PSNames] Dry run: would merge {other} into {target} (PS4_MERGE=true does it)"); continue; }
                     foreach (var item in Directory.EnumerateFileSystemEntries(other).ToList())
                     {
                         var to = Path.Combine(target, Path.GetFileName(item));
@@ -189,6 +196,7 @@ namespace RetroArr.Core.Games
                         catch (Exception ex) { _logger.Warn($"[PSNames] Could not move {item}: {ex.Message}"); }
                     }
                     try { if (!Directory.EnumerateFileSystemEntries(other).Any()) Directory.Delete(other); } catch (Exception) { }
+                    if (Directory.Exists(other)) _otherCopies.Add(other);
                     _logger.Info($"[PSNames] Merged {other} into {target}");
                 }
             }

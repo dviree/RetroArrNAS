@@ -192,6 +192,7 @@ namespace RetroArr.Core.Test.Games
             Assert.That(dirs, Does.Contain(Path.GetFileName(game)));
             Assert.That(Directory.EnumerateFiles(game).Select(Path.GetFileName), Is.EquivalentTo(new[] { "base.pkg", "update.pkg" }));
             Assert.That(dirs, Has.Count.EqualTo(2), "the folder whose base.pkg was there already stays, with only that file");
+            Assert.That(Directory.EnumerateFiles(b).Select(Path.GetFileName), Is.EqualTo(new[] { "base.pkg" }), "and keeps its own name: the game's name is the merged folder's");
         }
 
         [Test]
