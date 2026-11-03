@@ -99,6 +99,7 @@ namespace RetroArr.Core.Games
         public async Task<List<(string From, string To)>> RunOnceAsync(CancellationToken ct = default)
         {
             var done = new List<(string, string)>();
+            _votes.Clear();
             SortExtras(done);
             await SortIntoGameFoldersAsync(done);
             foreach (var folder in Folders().Where(Directory.Exists))
@@ -116,7 +117,7 @@ namespace RetroArr.Core.Games
                     var name = Path.GetFileName(entry);
                     if (name.StartsWith('.')) continue;
                     // A converter may still be at work on what changed lately
-                    if (!(NeedsName(name) || NameSaysNothing(entry)) || RecentlyWritten(entry)) continue;
+                    if (!(NeedsName(name) || NameSaysNothing(entry) || TitleDisagrees(entry)) || RecentlyWritten(entry)) continue;
                     // A second folder of a PS4 game keeps its name: the game's name is the folder it is merged into
                     if (_otherCopies.Contains(entry)) continue;
                     var target = await NewNameAsync(entry);
@@ -158,7 +159,7 @@ namespace RetroArr.Core.Games
                 var game = PlayStationImporter.GameTitleIn(id, ps4) ?? Regex.Replace(name, @"\s*\[.*$", "").Trim();
                 if (game.Length == 0) continue;
                 var to = Path.Combine(PlayStationImporter.Ps4GameFolder(ps4, id, game), name);
-                if (File.Exists(to)) continue;
+                if (File.Exists(to)) { TrashIfCopy(pkg, to); continue; }
                 try
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(to)!);
@@ -174,6 +175,24 @@ namespace RetroArr.Core.Games
         private string LibraryTitle(string id) => LibraryTitleOf(id).Title;
 
         // The title, and whether only DLC carry this ID (a DLC's own ID: PPSA01289 for Sackboy's DLC, PPSA01288 the game)
+        private readonly Dictionary<string, Dictionary<string, int>> _votes = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// A name of ours whose game disagrees with what most entries of its title ID say: "Sable [PPSA01289].pkg" among
+        /// 55 "Sackboy A Big Adventure [PPSA01289] ..." (one title ID is one game). It needs a clear majority: 3 or more,
+        /// and twice as many as its own name has.
+        /// </summary>
+        internal bool TitleDisagrees(string entry)
+        {
+            var name = Path.GetFileName(entry);
+            var id = PlayStationPackageInspector.TitleIdIn(name);
+            if (id.Length == 0 || PlayStationImporter.GameOfName(name) is not { } game) return false;
+            if (!_votes.TryGetValue(id, out var votes)) _votes[id] = votes = PlayStationImporter.TitleVotes(id, Folders(), NeedsName);
+            if (votes.Count == 0) return false;
+            var best = votes.OrderByDescending(v => v.Value).First();
+            return !string.Equals(best.Key, game, StringComparison.OrdinalIgnoreCase) && best.Value >= 3 && best.Value >= 2 * votes.GetValueOrDefault(game);
+        }
+
         private (string Title, bool OnlyDlc) LibraryTitleOf(string id) =>
             PlayStationImporter.KnownTitle(id, Folders(), NeedsName);
 
@@ -239,6 +258,18 @@ namespace RetroArr.Core.Games
             }
             catch (Exception) { }
             return string.Empty;
+        }
+
+        // A file whose place holds the same file already (same size) is a copy: it goes to the trash
+        private void TrashIfCopy(string file, string existing)
+        {
+            try
+            {
+                if (_trash == null || new FileInfo(file).Length != new FileInfo(existing).Length) return;
+                if (_trash.MoveAsync(file, null, Path.GetFileName(file)).GetAwaiter().GetResult() != null)
+                    _logger.Info($"[PSNames] {file} is a copy of {existing}; it went to the trash");
+            }
+            catch (Exception ex) { _logger.Warn($"[PSNames] Could not trash the copy {file}: {ex.Message}"); }
         }
 
         // Where PS5 update and DLC PKGs go: the folder they share with the backports, outside the library
@@ -310,7 +341,10 @@ namespace RetroArr.Core.Games
                 List<string> loose;
                 try
                 {
-                    loose = (backport ? Directory.EnumerateFileSystemEntries(kind) : Directory.EnumerateFiles(kind))
+                    loose = (backport ? Directory.EnumerateFileSystemEntries(kind) : Directory.EnumerateFiles(kind)
+                            // and a file in another game's folder ("dlc/Sable/Sackboy A Big Adventure [PPSA01289] ...")
+                            .Concat(Directory.EnumerateDirectories(kind).SelectMany(d => Directory.EnumerateFiles(d)
+                                .Where(f => PlayStationImporter.GameOfName(Path.GetFileName(f)) is { } g && !string.Equals(g, Path.GetFileName(d), StringComparison.OrdinalIgnoreCase)))))
                         .Where(e => !Path.GetFileName(e).StartsWith('.') && !RecentlyWritten(e)).OrderBy(e => e, StringComparer.Ordinal).ToList();
                 }
                 catch (Exception) { continue; }
@@ -333,7 +367,11 @@ namespace RetroArr.Core.Games
                     {
                         if (File.Exists(entry) && File.Exists(to) && new FileInfo(entry).Length == new FileInfo(to).Length && _trash != null
                             && await _trash.MoveAsync(entry, null, name) != null)
+                        {
                             _logger.Info($"[PSNames] {entry} is a copy of {to}; it went to the trash");
+                            var left = Path.GetDirectoryName(entry)!;
+                            if (!string.Equals(left, kind, StringComparison.Ordinal) && !Directory.EnumerateFileSystemEntries(left).Any()) Directory.Delete(left);
+                        }
                         continue;
                     }
                     try
@@ -342,6 +380,9 @@ namespace RetroArr.Core.Games
                         Rename(entry, to);
                         done.Add((entry, to));
                         _logger.Info($"[PSNames] Sorted {name} into {into}");
+                        // A game folder this left empty goes
+                        var from = Path.GetDirectoryName(entry)!;
+                        if (!string.Equals(from, kind, StringComparison.Ordinal) && !Directory.EnumerateFileSystemEntries(from).Any()) Directory.Delete(from);
                     }
                     catch (Exception ex) { _logger.Warn($"[PSNames] Could not sort {entry}: {ex.Message}"); }
                 }
@@ -370,7 +411,7 @@ namespace RetroArr.Core.Games
                 if (PlayStationPackageInspector.TitleIdIn(fileName).Length == 0 && PlayStationPackageInspector.Inspect(pkg).TitleId is { Length: > 0 } folderId)
                     fileName = folderId + " " + fileName;
                 var to = Path.Combine(into, fileName);
-                if (File.Exists(to)) continue;
+                if (File.Exists(to)) { TrashIfCopy(pkg, to); continue; }
                 try
                 {
                     Directory.CreateDirectory(into);
@@ -400,7 +441,7 @@ namespace RetroArr.Core.Games
                 var to = PlayStationImporter.IsUpdateOrDlcPkg(pkg)
                     ? Path.Combine(PlayStationImporter.ExtrasTargetFor(ExtrasRoot, pkg), Path.GetFileName(pkg))
                     : Path.Combine(folder, PlayStationImporter.PkgFolder, Path.GetFileName(pkg));
-                if (File.Exists(to)) continue;
+                if (File.Exists(to)) { TrashIfCopy(pkg, to); continue; }
                 try
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(to)!);
@@ -469,7 +510,7 @@ namespace RetroArr.Core.Games
             if (File.Exists(entry) && package.Format == PlayStationFormat.Pkg && package.Content == PlayStationContent.Game
                 && PlayStationImporter.ExtrasKind(entry, package) is { } kindFirst)
                 package = package with { Content = kindFirst };
-            var title = package.Content == PlayStationContent.Dlc ? string.Empty : PlayStationImporter.SafeTitle(package.Title);
+            var title = package.Content == PlayStationContent.Dlc || TitleDisagrees(entry) ? string.Empty : PlayStationImporter.SafeTitle(package.Title);
             // Else the name the library gives that game already, the AI's, or the title in the release name
             if (title.Length == 0)
             {

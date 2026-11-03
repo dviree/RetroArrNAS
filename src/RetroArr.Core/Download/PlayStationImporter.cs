@@ -124,6 +124,23 @@ namespace RetroArr.Core.Download
         /// the one most of them give, the game's own entries first on a tie, so one wrong name ("Sable") does not win.
         /// OnlyDlc: every entry of the ID is a DLC (a DLC's own ID, PPSA01289 for Sackboy's DLC, PPSA01288 the game).
         /// </summary>
+        /// <summary>How many entries in these folders give each game name for a title ID.</summary>
+        internal static Dictionary<string, int> TitleVotes(string titleId, IEnumerable<string> folders, Func<string, bool>? skip = null)
+        {
+            var tag = " [" + titleId + "]";
+            var votes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var f in folders.Distinct(StringComparer.Ordinal).Where(Directory.Exists))
+                try
+                {
+                    foreach (var n in Directory.EnumerateFileSystemEntries(f).Select(Path.GetFileName).OfType<string>()
+                                 .Where(n => !n.StartsWith('.') && n.Contains(tag, StringComparison.OrdinalIgnoreCase) && (skip == null || !skip(n))))
+                        if (SafeTitle(n[..n.IndexOf(tag, StringComparison.OrdinalIgnoreCase)]) is { Length: > 0 } title)
+                            votes[title] = votes.GetValueOrDefault(title) + 1;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            return votes;
+        }
+
         internal static (string Title, bool OnlyDlc) KnownTitle(string titleId, IEnumerable<string> folders, Func<string, bool>? skip = null)
         {
             var tag = " [" + titleId + "]";

@@ -379,6 +379,59 @@ namespace RetroArr.Core.Test.Games
         }
 
         [Test]
+        public async Task TheNasSackboyMess_EndsInOneSackboyFolder_CopiesInTheTrash_NoSableLeft()
+        {
+            PlayStationImporter.SmallPkg = 1L << 30;
+            try
+            {
+                var config = new ConfigurationService(_root);
+                var media = config.LoadMediaSettings();
+                media.TrashPath = Path.Combine(_root, "bin");
+                config.SaveMediaSettings(media);
+                var namer = new PlayStationLibraryNamer(config, trash: new TrashService(config)) { ExtrasRoot = _namer.ExtrasRoot };
+                var extras = Directory.CreateDirectory(namer.ExtrasRoot).FullName;
+                var sackboy = Directory.CreateDirectory(Path.Combine(extras, "dlc", "Sackboy A Big Adventure")).FullName;
+                var pride = PlayStationReadersTest.Ps5Pkg("UP9000-PPSA01289_00-SABAPRIDE0000001", "Pride Costume");
+                var deluxe = PlayStationReadersTest.Ps5Pkg("UP9000-PPSA01289_00-DIGITALDELUXEUPG", "New Digital Deluxe Edition");
+                var files = new (string Path, byte[] Data)[]
+                {
+                    (Path.Combine(sackboy, "Sackboy A Big Adventure [PPSA01289] [DLC SABAPRIDE0000001].pkg"), pride),
+                    (Path.Combine(sackboy, "Sackboy A Big Adventure [PPSA01289] [DLC DIGITALDELUXEUPG].pkg"), deluxe),
+                    (Path.Combine(sackboy, "Sackboy A Big Adventure [PPSA01289] [DLC SABAKRATOS000001].pkg"), PlayStationReadersTest.Ps5Pkg("UP9000-PPSA01289_00-SABAKRATOS000001", "Kratos Costume")),
+                    (Path.Combine(extras, "Sable [PPSA01289].pkg"), deluxe),
+                    (Path.Combine(_ps5, "pkg", "Sable [PPSA01289].pkg"), pride),
+                    (Path.Combine(extras, "Sable [PPSA01289] [v1.24].pkg"), PlayStationReadersTest.Ps5Pkg("UP9000-PPSA01289_00-SACKBOYPATCH0000", "Sackboy: A Big Adventure", "01.024.000")),
+                };
+                // On the NAS some 55 Sackboy DLC share the ID; a few more here make the majority clear
+                files = files.Concat(new[] { "SABAAPPLE0000001", "SABACLANK0000001", "SABADAISY0000001", "SABAELLIE0000001" }
+                    .Select(l => (Path.Combine(sackboy, $"Sackboy A Big Adventure [PPSA01289] [DLC {l}].pkg"), PlayStationReadersTest.Ps5Pkg("UP9000-PPSA01289_00-" + l, l)))).ToArray();
+                foreach (var (path, data) in files)
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                    File.WriteAllBytes(path, data);
+                    File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddDays(-1));
+                }
+
+                for (var i = 0; i < 4; i++)
+                {
+                    foreach (var f in Directory.EnumerateFiles(_root, "*.pkg", SearchOption.AllDirectories)) File.SetLastWriteTimeUtc(f, DateTime.UtcNow.AddDays(-1));
+                    await namer.RunOnceAsync();
+                }
+
+                var all = Directory.EnumerateFiles(_root, "*.pkg", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(_root, f)).ToList();
+                var where = string.Join("\n", all);
+                Assert.That(all.Where(f => !f.StartsWith("bin", StringComparison.Ordinal)), Has.None.Contains("Sable"), where);
+                Assert.That(Directory.EnumerateFiles(sackboy).Count(), Is.EqualTo(7), where);
+                Assert.That(Directory.EnumerateFiles(Path.Combine(_root, "bin"), "*.pkg", SearchOption.AllDirectories).Count(), Is.EqualTo(2), "the two copies: " + where);
+                Assert.That(Directory.EnumerateFiles(Path.Combine(extras, "updates", "Sackboy A Big Adventure")).Select(Path.GetFileName),
+                    Is.EqualTo(new[] { "Sackboy A Big Adventure [PPSA01289] [Update] [v1.24].pkg" }), where);
+                Assert.That(Directory.EnumerateDirectories(Path.Combine(extras, "dlc")).Select(Path.GetFileName), Is.EqualTo(new[] { "Sackboy A Big Adventure" }), where);
+                namer.Dispose();
+            }
+            finally { PlayStationImporter.SmallPkg = 0; }
+        }
+
+        [Test]
         public async Task NamedOrBusyFolders_AreLeftAlone()
         {
             Game(_lz4, "FINAL FANTASY VII REMAKE [PPSA01903] [v1.5]-lz4");
