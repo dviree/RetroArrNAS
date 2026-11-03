@@ -225,6 +225,7 @@ namespace RetroArr.Core.Test.Games
             }
             Directory.SetLastWriteTimeUtc(backport, DateTime.UtcNow.AddDays(-1));
 
+            Assert.That(PlayStationLibraryNamer.SortExtrasOn, Is.True, "on unless PS_EXTRAS_SORT=false");
             _namer.SortOverride = false;
             await _namer.RunOnceAsync();
             Assert.That(File.Exists(update) && File.Exists(dlc) && Directory.Exists(backport), Is.True, "a dry run moves nothing");
@@ -262,11 +263,11 @@ namespace RetroArr.Core.Test.Games
         public async Task UpdatesAndDlcOutsideTheLibrary_GetTheGamesName_Too()
         {
             _namer.ExtrasRoot = Directory.CreateDirectory(Path.Combine(_root, "backport-updates-dlc")).FullName;
-            Game(_namer.ExtrasRoot, "PPSA26344-app0");
+            Game(Path.Combine(_namer.ExtrasRoot, "backport"), "PPSA26344-app0");
 
             await _namer.RunOnceAsync();
 
-            Assert.That(Directory.Exists(Path.Combine(_namer.ExtrasRoot, "Ghost of Yōtei [PPSA26344] [v1.0.2]")), Is.True);
+            Assert.That(Directory.Exists(Path.Combine(_namer.ExtrasRoot, "backport", "Ghost of Yōtei [PPSA26344] [v1.0.2]")), Is.True);
         }
     }
 }

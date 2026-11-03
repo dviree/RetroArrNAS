@@ -219,15 +219,18 @@ namespace RetroArr.Core.Games
         // Where PS5 update and DLC PKGs go: the folder they share with the backports, outside the library
         internal string ExtrasRoot = PlayStationImporter.DefaultExtrasRoot;
 
-        /// <summary>PS_EXTRAS_SORT=true sorts what lies loose in the extras folder; anything else only writes the plan.</summary>
-        public static bool SortExtrasOn => string.Equals(Environment.GetEnvironmentVariable("PS_EXTRAS_SORT"), "true", StringComparison.OrdinalIgnoreCase);
+        /// <summary>
+        /// On unless PS_EXTRAS_SORT=false (then it only writes the plan). The owner asked for this sort, and the extras
+        /// folder holds only what RetroArr put there.
+        /// </summary>
+        public static bool SortExtrasOn => !string.Equals(Environment.GetEnvironmentVariable("PS_EXTRAS_SORT"), "false", StringComparison.OrdinalIgnoreCase);
 
         internal bool? SortOverride;
         internal readonly List<string> SortPlan = new();
 
         // What lies loose in the extras folder from before goes into its three folders: update PKGs into updates/, DLC
         // PKGs into dlc/, everything else (a backport's release folder or file) into backport/. Never over a file of the
-        // same name. Off unless PS_EXTRAS_SORT=true: then it only writes extras-sort-plan.log.
+        // same name. PS_EXTRAS_SORT=false only writes extras-sort-plan.log.
         private void SortExtras(List<(string, string)> done)
         {
             SortPlan.Clear();
@@ -263,7 +266,7 @@ namespace RetroArr.Core.Games
                 try
                 {
                     File.WriteAllLines(Path.Combine(_config.GetConfigDirectory(), "extras-sort-plan.log"), SortPlan);
-                    _logger.Info($"[PSNames] Dry run: {SortPlan.Count} entries in {ExtrasRoot} would be sorted, see extras-sort-plan.log (PS_EXTRAS_SORT=true does it)");
+                    _logger.Info($"[PSNames] Dry run: {SortPlan.Count} entries in {ExtrasRoot} would be sorted, see extras-sort-plan.log (PS_EXTRAS_SORT=false keeps it a dry run)");
                 }
                 catch (Exception ex) { _logger.Warn($"[PSNames] Could not write the sort plan: {ex.Message}"); }
         }
