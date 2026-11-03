@@ -249,6 +249,7 @@ namespace RetroArr.Host
             builder.Services.AddHostedService<PlayStationLibraryNamer>();
             builder.Services.AddHostedService<MissingGameRelinker>();
             builder.Services.AddHostedService<BiosSorter>();
+            builder.Services.AddHostedService<LeftoverCleaner>();
             builder.Services.AddHostedService<AiMetadataFixer>();
             builder.Services.AddHostedService<ContentStateUpgradeService>();
 

@@ -57,6 +57,9 @@ This fork adds what a download-and-sort pipeline on a NAS needs, so no scripts r
 | `PS_BACKPORT_FOLDER` | `/nas/games/backport-updates-dlc` | Where PS5 updates, DLC and backports are kept |
 | `PS_RENAME` | `true` | Give PS entries that are only a title ID, or a release name, the game's name |
 | `PS_EXTRAS_SORT` | `true` | Sorts what lies loose in the backport-updates-dlc folder into its `backport/`, `updates/` and `dlc/` folders; `false` only writes `extras-sort-plan.log` |
+| `CLEANUP` | `true` | Sends what RetroArr left behind (its PS/Switch work folders, half-written `.retroarr-*` files in roms) to the trash once untouched for `CLEANUP_DAYS`; `dryrun` only writes `cleanup-plan.log`, `false` turns it off |
+| `CLEANUP_DAYS` | `2` | How long a leftover must be untouched before it goes |
+| `CLEANUP_FOLDERS` | empty | More folders whose contents go the same way, separated by `;` (an old tool's work folder, a test folder); the folders themselves stay |
 | `PS4_MERGE` | `true` | Merges two roms/ps4 folders of one game into one (a same-size copy goes to the trash); `false` only logs it |
 | `PS_HOLD_FILE` | - | A file that pauses PS imports while it exists |
 | `SWITCH_KEYS_FILE` | `/app/config/switch/prod.keys` | Your own keys; merging is off without them |
