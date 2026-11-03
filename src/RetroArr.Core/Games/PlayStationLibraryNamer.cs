@@ -102,7 +102,7 @@ namespace RetroArr.Core.Games
                     var name = Path.GetFileName(entry);
                     if (name.StartsWith('.')) continue;
                     // A converter may still be at work on what changed lately
-                    if (!NeedsName(name) || RecentlyWritten(entry)) continue;
+                    if (!(NeedsName(name) || NameSaysNothing(entry)) || RecentlyWritten(entry)) continue;
                     // A second folder of a PS4 game keeps its name: the game's name is the folder it is merged into
                     if (_otherCopies.Contains(entry)) continue;
                     var target = await NewNameAsync(entry);
@@ -349,6 +349,19 @@ namespace RetroArr.Core.Games
             if (Regex.IsMatch(stem, @"^\d{6}\s*-")) return true;
             if (!Regex.IsMatch(stem, @"\[(?:PPSA|CUSA|ECAS)\d{5}\]", RegexOptions.IgnoreCase)) return true;
             return Regex.Matches(stem, @"\[[^\]]*\]").Any(m => !OurTag.IsMatch(m.Value));
+        }
+
+        /// <summary>
+        /// A PKG or image whose name carries no title ID ("sable.pkg") but whose own header does: it is named from that
+        /// like a title-ID-only name.
+        /// </summary>
+        internal static bool NameSaysNothing(string entry)
+        {
+            var name = Path.GetFileName(entry);
+            if (!File.Exists(entry) || PlayStationPackageInspector.TitleIdIn(name).Length > 0) return false;
+            if (!Regex.IsMatch(name, @"\.(pkg|exfat|ffpfsc)$", RegexOptions.IgnoreCase)) return false;
+            try { return PlayStationPackageInspector.Inspect(entry).TitleId is { Length: > 0 }; }
+            catch (Exception) { return false; }
         }
 
         private static bool RecentlyWritten(string entry)

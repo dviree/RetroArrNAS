@@ -241,6 +241,26 @@ namespace RetroArr.Core.Test.Games
         }
 
         [Test]
+        public async Task APkgWithNoIdInItsName_IsNamedFromItsHeader_AndADlcGoesToDlc()
+        {
+            _namer.ExtrasRoot = Path.Combine(_root, "backport-updates-dlc");
+            var pkgFolder = Directory.CreateDirectory(Path.Combine(_ps5, "pkg")).FullName;
+            var game = Path.Combine(pkgFolder, "sable.pkg");
+            File.WriteAllBytes(game, PlayStationReadersTest.Pkg("UP0000-CUSA12345_00-SABLE00000000000",
+                PlayStationReadersTest.Sfo(("CATEGORY", "gd"), ("TITLE", "Sable"), ("TITLE_ID", "CUSA12345"), ("APP_VER", "01.05"))));
+            var dlc = Path.Combine(pkgFolder, "costume.pkg");
+            File.WriteAllBytes(dlc, PlayStationReadersTest.Pkg("EP9000-PPSA01289_00-SABAPC0000000009",
+                PlayStationReadersTest.Sfo(("CATEGORY", "ac"), ("TITLE", "Sackboy Costume"), ("TITLE_ID", "PPSA01289"), ("APP_VER", "01.00"))));
+            foreach (var f in new[] { game, dlc }) File.SetLastWriteTimeUtc(f, DateTime.UtcNow.AddDays(-1));
+
+            await _namer.RunOnceAsync();
+
+            Assert.That(Directory.EnumerateFiles(pkgFolder).Select(Path.GetFileName), Is.EqualTo(new[] { "Sable [CUSA12345] [v1.5].pkg" }));
+            Assert.That(Directory.EnumerateFiles(Path.Combine(_namer.ExtrasRoot, "dlc")).Count(), Is.EqualTo(1), "a DLC by its header, whatever its name");
+            Assert.That(PlayStationLibraryNamer.NameSaysNothing(Path.Combine(pkgFolder, "Sable [CUSA12345] [v1.5].pkg")), Is.False);
+        }
+
+        [Test]
         public async Task NamedOrBusyFolders_AreLeftAlone()
         {
             Game(_lz4, "FINAL FANTASY VII REMAKE [PPSA01903] [v1.5]-lz4");
