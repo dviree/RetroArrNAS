@@ -5,6 +5,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace RetroArr.Core.Games
 {
@@ -183,6 +184,71 @@ namespace RetroArr.Core.Games
     /// The content ID and the param.sfo of a PS4 package (big-endian "\x7FCNT" header, entry 0x1000), read without
     /// decrypting anything. A PS5 package keeps its metadata encrypted; for those only the file name speaks.
     /// </summary>
+    /// <summary>
+    /// A PS5 PKG (magic 7F 46 49 48): its content ID at 0x80040 and its param.json, which lies in plain text inside
+    /// the first megabytes ("titleId", "contentId", "contentVersion", "localizedParameters"). Both DLC and games carry them.
+    /// </summary>
+    [SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes")]
+    public static class Ps5PkgReader
+    {
+        public const uint Magic = 0x7F464948;
+        internal const int ContentIdOffset = 0x80040;
+        internal static int ScanBytes = 8 * 1024 * 1024;
+        private static readonly Regex ContentId = new(@"^[A-Z]{2}\d{4}-(?:PPSA|ECAS)\d{5}_\d{2}-[A-Z0-9]{16}$");
+
+        public static (string? ContentId, string? ParamJson) Read(string file)
+        {
+            try
+            {
+                using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                var magic = new byte[4];
+                if (stream.Read(magic, 0, 4) < 4 || BinaryPrimitives.ReadUInt32BigEndian(magic) != Magic) return (null, null);
+                var buffer = new byte[(int)Math.Min(stream.Length, ScanBytes)];
+                stream.Position = 0;
+                stream.ReadExactly(buffer);
+                string? contentId = null;
+                if (buffer.Length >= ContentIdOffset + 36)
+                {
+                    var atOffset = Encoding.ASCII.GetString(buffer, ContentIdOffset, 36).TrimEnd('\0');
+                    if (ContentId.IsMatch(atOffset)) contentId = atOffset;
+                }
+                return (contentId, ParamJsonIn(buffer));
+            }
+            catch (Exception)
+            {
+                return (null, null);
+            }
+        }
+
+        // The JSON object around the first "contentId" key: back to its '{', then forward to the matching '}'
+        private static string? ParamJsonIn(byte[] buffer)
+        {
+            var key = Encoding.ASCII.GetBytes("\"contentId\"");
+            var at = buffer.AsSpan().IndexOf(key);
+            if (at < 0) return null;
+            var start = -1;
+            for (var i = at; i >= Math.Max(0, at - 4096); i--)
+                if (buffer[i] == (byte)'{') { start = i; break; }
+            if (start < 0) return null;
+            var depth = 0;
+            var inString = false;
+            for (var i = start; i < Math.Min(buffer.Length, start + 65536); i++)
+            {
+                var b = buffer[i];
+                if (inString)
+                {
+                    if (b == (byte)'\\') i++;
+                    else if (b == (byte)'"') inString = false;
+                    continue;
+                }
+                if (b == (byte)'"') inString = true;
+                else if (b == (byte)'{') depth++;
+                else if (b == (byte)'}' && --depth == 0) return Encoding.UTF8.GetString(buffer, start, i - start + 1);
+            }
+            return null;
+        }
+    }
+
     [SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes")]
     public static class PkgReader
     {

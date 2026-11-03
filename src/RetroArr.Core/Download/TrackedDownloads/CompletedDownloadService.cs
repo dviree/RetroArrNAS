@@ -113,7 +113,7 @@ namespace RetroArr.Core.Download.TrackedDownloads
                 // Nothing in the name: the model may know the platform from the name and the files together
                 if (string.IsNullOrEmpty(trackedDownload.PlatformFolder) && _ai is { IsEnabled: true })
                 {
-                    var guess = await _ai.IdentifyAsync(trackedDownload.Title, PostDownloadProcessor.FileNamesFor(trackedDownload.OutputPath));
+                    var guess = await _ai.IdentifyAsync(trackedDownload.Title, PostDownloadProcessor.FileNamesFor(trackedDownload.OutputPath), default, MetadataSource.FileFacts.Describe(trackedDownload.OutputPath));
                     if (guess != null)
                     {
                         trackedDownload.PlatformFolder = guess.Platform;

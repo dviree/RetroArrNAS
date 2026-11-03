@@ -134,6 +134,26 @@ namespace RetroArr.Core.Test.Download
         }
 
         [Test]
+        public async Task APs5Dlc_IsReadFromInside_AndNamedForItsGame_NotItsOwnName()
+        {
+            PlayStationImporter.SmallPkg = 1L << 30;
+            try
+            {
+                var sackboy = Directory.CreateDirectory(Path.Combine(_importer.BackportRoot, "dlc", "Sackboy A Big Adventure")).FullName;
+                File.WriteAllText(Path.Combine(sackboy, "Sackboy A Big Adventure [PPSA01289] [DLC SABAAPPLE0000001].pkg"), "apple");
+                var raw = Path.Combine(_inbox, "sable.pkg");
+                File.WriteAllBytes(raw, PlayStationReadersTest.Ps5Pkg("UP9000-PPSA01289_00-SABAKRATOS000001", "Kratos Costume"));
+
+                var result = await Import(raw);
+
+                Assert.That(result.Success, Is.True, result.Reason);
+                Assert.That(File.Exists(Path.Combine(sackboy, "Sackboy A Big Adventure [PPSA01289] [DLC SABAKRATOS000001].pkg")), Is.True,
+                    string.Join(", ", Directory.EnumerateFiles(_root, "*.pkg", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(_root, f))));
+            }
+            finally { PlayStationImporter.SmallPkg = 0; }
+        }
+
+        [Test]
         public async Task DlcAndUpdates_NeverReplaceTheGame()
         {
             Directory.CreateDirectory(Ps5);

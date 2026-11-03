@@ -69,6 +69,15 @@ namespace RetroArr.Core.Test.MetadataSource
             Assert.That(fake.Auth, Is.EqualTo("Bearer sk-test"));
         }
 
+        [Test]
+        public async Task WhatIsReadInsideTheFiles_GoesIntoThePrompt()
+        {
+            var (ai, fake) = Create("{\"platform\": \"ps5\", \"title\": \"Sackboy A Big Adventure\", \"confidence\": 0.95}");
+            await ai.IdentifyAsync("sable.pkg PPSA01289", new[] { "sable.pkg" }, default,
+                new[] { "sable.pkg (1.1 MB): format PS5 PKG, title ID PPSA01289, content ID UP9000-PPSA01289_00-SABAKRATOS000001, its own name Kratos Costume" });
+            Assert.That(fake.Bodies[0], Does.Contain("Read from inside the files").And.Contain("its own name Kratos Costume"));
+        }
+
         [TestCase("steam")]
         [TestCase("gog")]
         [TestCase("epic")]

@@ -2255,7 +2255,7 @@ namespace RetroArr.Core.Games
             try
             {
                 var files = Directory.Exists(path) ? Directory.EnumerateFileSystemEntries(path!).Take(30).Select(Path.GetFileName).OfType<string>() : new[] { raw };
-                var guess = await _ai.IdentifyAsync(raw, files);
+                var guess = await _ai.IdentifyAsync(raw, files, default, MetadataSource.FileFacts.Describe(path));
                 if (guess == null || string.IsNullOrWhiteSpace(guess.Title)) return gameTitle;
                 Log($"[Scanner] AI named '{raw}' -> '{guess.Title}'");
                 return guess.Title;

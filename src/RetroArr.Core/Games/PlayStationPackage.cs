@@ -120,6 +120,12 @@ namespace RetroArr.Core.Games
                 {
                     var (headerId, sfo) = PkgReader.Read(file);
                     var meta = FromSfo(sfo);
+                    // A PS5 PKG: its own content ID and param.json, read from inside it
+                    if (headerId == null && sfo.Count == 0 && Ps5PkgReader.Read(file) is var (ps5Id, json) && (ps5Id != null || json != null))
+                    {
+                        headerId = ps5Id ?? (json != null ? NullIfEmpty(ContentIdRegex.Match(json).Value) : null);
+                        if (json != null) meta = ParseParamJson(json);
+                    }
                     content = sfo.TryGetValue("CATEGORY", out var category) && category.StartsWith("gp", StringComparison.OrdinalIgnoreCase) ? PlayStationContent.Update
                         : category?.StartsWith("ac", StringComparison.OrdinalIgnoreCase) == true ? PlayStationContent.Dlc
                         : sfo.Count > 0 ? PlayStationContent.Game : content;

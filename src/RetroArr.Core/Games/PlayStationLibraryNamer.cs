@@ -465,7 +465,11 @@ namespace RetroArr.Core.Games
             var package = PlayStationPackageInspector.Inspect(entry);
             var id = package.TitleId ?? NullIfEmpty(PlayStationPackageInspector.TitleIdIn(name));
             if (id == null) return null;
-            var title = PlayStationImporter.SafeTitle(package.Title);
+            // An update or DLC PKG, also one known only by its size; a DLC's own name is the DLC's ("Kratos Costume")
+            if (File.Exists(entry) && package.Format == PlayStationFormat.Pkg && package.Content == PlayStationContent.Game
+                && PlayStationImporter.ExtrasKind(entry, package) is { } kindFirst)
+                package = package with { Content = kindFirst };
+            var title = package.Content == PlayStationContent.Dlc ? string.Empty : PlayStationImporter.SafeTitle(package.Title);
             // Else the name the library gives that game already, the AI's, or the title in the release name
             if (title.Length == 0)
             {
@@ -478,9 +482,10 @@ namespace RetroArr.Core.Games
             }
             if (title.Length == 0 && _ai is { IsEnabled: true })
             {
-                var guess = await _ai.IdentifyAsync(name + " " + id, new[] { name });
+                var guess = await _ai.IdentifyAsync(name + " " + id, new[] { name }, default, MetadataSource.FileFacts.Describe(entry));
                 if (guess != null && PlayStationImporter.IsPlayStation(guess.Platform)) title = PlayStationImporter.SafeTitle(guess.Title);
             }
+            if (title.Length == 0) title = PlayStationImporter.SafeTitle(package.Title);
             // The title in a release name, only when the name names the game ("Stray [PPSA02100] [VIKINGFILE]"): a name
             // without a title ID ("sable.pkg") says nothing about which game it is
             if (title.Length == 0 && PlayStationPackageInspector.TitleIdIn(name).Length > 0)

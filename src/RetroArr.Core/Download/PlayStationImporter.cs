@@ -384,11 +384,12 @@ namespace RetroArr.Core.Download
             var platformPath = Path.Combine(libraryRoot, platformFolder);
             var folder = package.Format == PlayStationFormat.Pkg && IsPs5(platformFolder) ? Path.Combine(platformPath, PkgFolder) : platformPath;
             Directory.CreateDirectory(platformPath);
+            // An update or DLC is known before its title: a DLC's own name is not its game's
+            var extrasKind = package.Format == PlayStationFormat.Pkg && IsPs5(platformFolder) ? ExtrasKind(from, package) : null;
+            if (extrasKind != null) package = package with { Content = extrasKind.Value };
             var title = await TitleForAsync(package, source, releaseName, from, platformPath);
             // A PS5 update or DLC goes with the backports, outside the library
             // (a small PS5 PKG with no readable header is one too, by its size)
-            var extrasKind = package.Format == PlayStationFormat.Pkg && IsPs5(platformFolder) ? ExtrasKind(from, package) : null;
-            if (extrasKind != null) package = package with { Content = extrasKind.Value };
             if (extrasKind != null)
                 folder = Path.Combine(ExtrasFolderFor(BackportRoot, package.Content), SafeTitle(title) is { Length: > 0 } game ? game : "");
             // A PS4 PKG goes into its game's folder, with the game's other PKGs: roms/ps4/<Game> [CUSA01234]/
@@ -471,7 +472,9 @@ namespace RetroArr.Core.Download
         private async Task<string> TitleForAsync(PlayStationPackage package, string source, string releaseName, string from, string folder)
         {
             var own = SafeTitle(package.Title);
-            if (own.Length > 0) return own;
+            // A DLC's own name is the DLC's ("Kratos Costume"): its game's name comes from the library or the AI
+            var dlc = package.Content == PlayStationContent.Dlc;
+            if (own.Length > 0 && !dlc) return own;
             // The name the library already gives this ID, in roms, its pkg folder and the extras folders: before the AI,
             // which guesses each file from its name alone ("SABAEVEN..." became "Sable")
             if (package.TitleId != null && KnownTitle(package.TitleId, new[] { folder, Path.Combine(folder, PkgFolder) }.Concat(ExtrasFoldersIn(BackportRoot))).Title is { Length: > 0 } known)
@@ -482,9 +485,10 @@ namespace RetroArr.Core.Download
                     ? Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories).Take(50).Select(f => Path.GetRelativePath(source, f))
                     : new[] { Path.GetFileName(source) };
                 var hint = string.Join(" ", new[] { releaseName, package.ContentId, package.TitleId }.Where(s => !string.IsNullOrEmpty(s)).Distinct());
-                var guess = await _ai.IdentifyAsync(hint, files);
+                var guess = await _ai.IdentifyAsync(hint, files, default, MetadataSource.FileFacts.Describe(from));
                 if (guess != null && IsPlayStation(guess.Platform) && SafeTitle(guess.Title).Length > 0) return SafeTitle(guess.Title);
             }
+            if (own.Length > 0) return own;
             var stem = File.Exists(source) ? Path.GetFileNameWithoutExtension(releaseName) : releaseName;
             var cleaned = CleanReleaseName(stem);
             if (cleaned.Length == 0) cleaned = CleanReleaseName(Path.GetFileNameWithoutExtension(from));

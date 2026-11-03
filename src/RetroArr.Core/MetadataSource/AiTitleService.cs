@@ -56,17 +56,19 @@ namespace RetroArr.Core.MetadataSource
             !string.Equals(Environment.GetEnvironmentVariable(name), "false", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>A confident guess, or null when the model is off, unsure, names no known platform or can't be reached.</summary>
-        public async Task<Guess?> IdentifyAsync(string releaseName, IEnumerable<string> fileNames, CancellationToken ct = default)
+        /// <param name="inside">What was read from inside the files (FileFacts): content IDs, titles in headers, sizes.</param>
+        public async Task<Guess?> IdentifyAsync(string releaseName, IEnumerable<string> fileNames, CancellationToken ct = default, IEnumerable<string>? inside = null)
         {
             if (!IsEnabled || string.IsNullOrWhiteSpace(releaseName)) return null;
             var files = fileNames.Take(300).ToList();
-            var key = releaseName + "\n" + string.Join("\n", files);
+            var facts = (inside ?? Enumerable.Empty<string>()).Where(l => !string.IsNullOrWhiteSpace(l)).Take(20).ToList();
+            var key = releaseName + "\n" + string.Join("\n", files) + "\n" + string.Join("\n", facts);
             if (_answers.TryGetValue(key, out var known)) return known;
 
             Guess? guess = null;
             try
             {
-                guess = await AskAsync(releaseName, files, ct).ConfigureAwait(false);
+                guess = await AskAsync(releaseName, files, facts, ct).ConfigureAwait(false);
                 _logger.Info(guess == null
                     ? $"[AI] No confident answer for '{releaseName}'"
                     : $"[AI] '{releaseName}' -> {guess.Platform} / {guess.Title} ({guess.Confidence:P0}): {guess.Reason}");
@@ -81,7 +83,7 @@ namespace RetroArr.Core.MetadataSource
             return guess;
         }
 
-        private async Task<Guess?> AskAsync(string releaseName, List<string> files, CancellationToken ct)
+        private async Task<Guess?> AskAsync(string releaseName, List<string> files, List<string> facts, CancellationToken ct)
         {
             // Store launchers (Steam, GOG, Epic) and front-end folders are not where a downloaded game goes
             var platforms = PlatformDefinitions.AllPlatforms.Where(p => p.Enabled && p.FolderName != "unknown" && !StoreFolders.Contains(p.FolderName))
@@ -93,14 +95,17 @@ Release name:
 
 Files in it:
 {string.Join("\n", files)}
-
+{(facts.Count == 0 ? "" : $@"
+Read from inside the files (trust this over the names):
+{string.Join("\n", facts)}
+")}
 Valid platforms (folder: name):
 {string.Join("\n", platforms)}
 
 Return JSON only:
 {{""platform"": ""exact folder from the list or unknown"", ""title"": ""the game's official title, no group, version, region or format tags"", ""confidence"": 0.0, ""reason"": ""brief reason""}}
 
-Use the release name, the file names and extensions together. A title ID (PPSA, CUSA, BCUS, a 16-digit Switch ID) names the platform. If it is genuinely ambiguous, use unknown and a low confidence.";
+Use what was read from inside the files first, then the release name, the file names and extensions. A DLC or update's own name (""Kratos Costume"") is not the game: give the game it belongs to. A title ID (PPSA, CUSA, BCUS, a 16-digit Switch ID) names the platform. If it is genuinely ambiguous, use unknown and a low confidence.";
 
             using var request = new HttpRequestMessage(HttpMethod.Post, _baseUrl + "/responses")
             {

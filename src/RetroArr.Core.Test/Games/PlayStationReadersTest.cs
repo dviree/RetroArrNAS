@@ -119,6 +119,37 @@ namespace RetroArr.Core.Test.Games
             return sfo;
         }
 
+        // A PS5 PKG as found on the NAS: magic 7F 46 49 48, content ID at 0x80040, param.json in plain text at 0x83946
+        internal static byte[] Ps5Pkg(string contentId, string titleName, string version = "01.000.000")
+        {
+            var json = "{\r\n  \"contentId\": \"" + contentId + "\",\r\n  \"contentVersion\": \"" + version + "\",\r\n  \"localizedParameters\": {\r\n    \"defaultLanguage\": \"en-US\",\r\n    \"en-US\": {\r\n      \"titleName\": \"" + titleName + "\"\r\n    }\r\n  },\r\n  \"masterVersion\": \"01.00\",\r\n  \"titleId\": \"" + contentId.Substring(7, 9) + "\"\r\n}";
+            var pkg = new byte[0x90000];
+            BinaryPrimitives.WriteUInt32BigEndian(pkg, 0x7F464948);
+            Encoding.ASCII.GetBytes(contentId).CopyTo(pkg, 0x80040);
+            Encoding.ASCII.GetBytes("param.json").CopyTo(pkg, 0x83946 - 0x40);
+            Encoding.UTF8.GetBytes(json).CopyTo(pkg, 0x83946);
+            return pkg;
+        }
+
+        [Test]
+        public void Ps5Pkg_ReadsItsContentIdAndParamJson()
+        {
+            var p = PlayStationPackageInspector.Inspect(Write("anything.pkg", Ps5Pkg("UP9000-PPSA01289_00-SABAKRATOS000001", "Kratos Costume")));
+            Assert.That((p.Format, p.TitleId, p.Title, p.Version), Is.EqualTo((PlayStationFormat.Pkg, "PPSA01289", "Kratos Costume", "01.000.000")));
+            Assert.That(p.ContentId, Is.EqualTo("UP9000-PPSA01289_00-SABAKRATOS000001"));
+            Assert.That(RetroArr.Core.MetadataSource.FileFacts.Read(Path.Combine(_root, "anything.pkg")),
+                Does.Contain("PS5 PKG").And.Contain("content ID UP9000-PPSA01289_00-SABAKRATOS000001").And.Contain("its own name Kratos Costume"));
+        }
+
+        [Test]
+        public void GbaHeader_GivesTitleAndGameCode()
+        {
+            var rom = new byte[0x200];
+            Encoding.ASCII.GetBytes("ADVANCEWARS").CopyTo(rom, 0xA0);
+            Encoding.ASCII.GetBytes("AWRE").CopyTo(rom, 0xAC);
+            Assert.That(RetroArr.Core.MetadataSource.FileFacts.Read(Write("x.gba", rom)), Is.EqualTo("title ADVANCEWARS, game code AWRE"));
+        }
+
         internal static byte[] Pkg(string contentId, byte[] sfo)
         {
             var pkg = new byte[0x200 + sfo.Length];

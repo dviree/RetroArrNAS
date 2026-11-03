@@ -83,7 +83,7 @@ namespace RetroArr.Core.Games
                 string? title = null;
                 if (_ai is { IsEnabled: true })
                 {
-                    var guess = await _ai.IdentifyAsync(game.Title, files, ct);
+                    var guess = await _ai.IdentifyAsync(game.Title, files, ct, MetadataSource.FileFacts.Describe(game.ExecutablePath ?? game.Path));
                     if (guess != null) title = guess.Title;
                 }
                 title ??= new TitleCleanerService().CleanGameTitle(game.Title).Title;

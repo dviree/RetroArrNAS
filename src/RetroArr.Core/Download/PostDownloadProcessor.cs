@@ -305,7 +305,7 @@ namespace RetroArr.Core.Download
             try 
             {
                 // AI cleanup gives IGDB a better query; the AI candidate only stands in where IGDB verifies neither name
-                var aiGuess = _ai is { IsEnabled: true } ? await _ai.IdentifyAsync(download.Name, FileNamesFor(download.DownloadPath)) : null;
+                var aiGuess = _ai is { IsEnabled: true } ? await _ai.IdentifyAsync(download.Name, FileNamesFor(download.DownloadPath), default, MetadataSource.FileFacts.Describe(download.DownloadPath)) : null;
                 var metadataService = _metadataFactory.CreateService();
                 var results = new List<Game>();
                 if (aiGuess != null && _ai!.Cleanup) results.AddRange(await metadataService.SearchGamesAsync(aiGuess.Title));
