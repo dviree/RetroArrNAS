@@ -82,7 +82,17 @@ namespace RetroArr.Core.Games
             foreach (var extra in PlayStationImporter.OtherLibraries) yield return extra;
             // PS5 updates, DLC and backports, outside the library: they get the game's name too
             yield return ExtrasRoot;
-            foreach (var sub in PlayStationImporter.ExtrasFolders) yield return Path.Combine(ExtrasRoot, sub);
+            foreach (var sub in PlayStationImporter.ExtrasFolders)
+            {
+                var kind = Path.Combine(ExtrasRoot, sub);
+                yield return kind;
+                // and each game's folder in it
+                string[] games;
+                try { games = Directory.Exists(kind) ? Directory.GetDirectories(kind) : Array.Empty<string>(); }
+                catch (Exception) { games = Array.Empty<string>(); }
+                if (sub != PlayStationImporter.BackportFolder)
+                    foreach (var game in games.Where(g => !Path.GetFileName(g).StartsWith('.')).OrderBy(g => g, StringComparer.Ordinal)) yield return game;
+            }
         }
 
         /// <summary>Renames what needs a name. Returns the renames made, old path to new path.</summary>
@@ -90,6 +100,7 @@ namespace RetroArr.Core.Games
         {
             var done = new List<(string, string)>();
             SortExtras(done);
+            await SortIntoGameFoldersAsync(done);
             foreach (var folder in Folders().Where(Directory.Exists))
             {
                 MovePkgsIntoTheirFolder(folder, done);
@@ -272,7 +283,7 @@ namespace RetroArr.Core.Games
             foreach (var entry in loose)
             {
                 var into = File.Exists(entry) && entry.EndsWith(".pkg", StringComparison.OrdinalIgnoreCase) && PlayStationImporter.IsUpdateOrDlcPkg(entry)
-                    ? PlayStationImporter.ExtrasFolderFor(ExtrasRoot, entry)
+                    ? PlayStationImporter.ExtrasTargetFor(ExtrasRoot, entry)
                     : Path.Combine(ExtrasRoot, PlayStationImporter.BackportFolder);
                 var to = Path.Combine(into, Path.GetFileName(entry));
                 if (File.Exists(to) || Directory.Exists(to)) { SortPlan.Add($"KEEP {entry} ({to} is there already)"); continue; }
@@ -296,6 +307,58 @@ namespace RetroArr.Core.Games
                 catch (Exception ex) { _logger.Warn($"[PSNames] Could not write the sort plan: {ex.Message}"); }
         }
 
+        // In updates/ and dlc/ each game has its folder ("dlc/Sackboy A Big Adventure/"), and in backport/ each game's
+        // releases share one ("backport/Onimusha/<release>/"). A file whose name does not say its game yet waits until
+        // it is named. Never over a file of the same name; a same-size copy goes to the trash. On unless PS_EXTRAS_SORT=false.
+        private async Task SortIntoGameFoldersAsync(List<(string, string)> done)
+        {
+            if (!(SortOverride ?? SortExtrasOn)) return;
+            foreach (var sub in PlayStationImporter.ExtrasFolders)
+            {
+                var kind = Path.Combine(ExtrasRoot, sub);
+                if (!Directory.Exists(kind)) continue;
+                var backport = sub == PlayStationImporter.BackportFolder;
+                List<string> loose;
+                try
+                {
+                    loose = (backport ? Directory.EnumerateFileSystemEntries(kind) : Directory.EnumerateFiles(kind))
+                        .Where(e => !Path.GetFileName(e).StartsWith('.') && !RecentlyWritten(e)).OrderBy(e => e, StringComparer.Ordinal).ToList();
+                }
+                catch (Exception) { continue; }
+                foreach (var entry in loose)
+                {
+                    var name = Path.GetFileName(entry);
+                    string? game;
+                    if (!backport) game = PlayStationImporter.GameOfName(name);
+                    else
+                    {
+                        // A backport release names its game by its title ID; a folder without one is a game's folder already
+                        var id = PlayStationPackageInspector.TitleIdIn(name);
+                        if (id.Length == 0) continue;
+                        game = LibraryTitle(id) is { Length: > 0 } known ? known : PlayStationImporter.CleanReleaseName(name);
+                    }
+                    if (string.IsNullOrEmpty(game) || string.Equals(game, name, StringComparison.Ordinal)) continue;
+                    var into = Path.Combine(kind, game);
+                    var to = Path.Combine(into, name);
+                    if (File.Exists(to) || Directory.Exists(to))
+                    {
+                        if (File.Exists(entry) && File.Exists(to) && new FileInfo(entry).Length == new FileInfo(to).Length && _trash != null
+                            && await _trash.MoveAsync(entry, null, name) != null)
+                            _logger.Info($"[PSNames] {entry} is a copy of {to}; it went to the trash");
+                        continue;
+                    }
+                    try
+                    {
+                        Directory.CreateDirectory(into);
+                        Rename(entry, to);
+                        done.Add((entry, to));
+                        _logger.Info($"[PSNames] Sorted {name} into {into}");
+                    }
+                    catch (Exception ex) { _logger.Warn($"[PSNames] Could not sort {entry}: {ex.Message}"); }
+                }
+            }
+        }
+
         // PS5 update and DLC PKGs in roms/ps5/pkg (and its "<Game> [DLC]" folders from before) go to ExtrasRoot
         private void MoveDlcIntoTheirFolder(string ps5, List<(string, string)> done)
         {
@@ -312,7 +375,7 @@ namespace RetroArr.Core.Games
             var left = new HashSet<string>(StringComparer.Ordinal);
             foreach (var pkg in pkgs.Where(p => !RecentlyWritten(p) && PlayStationImporter.IsUpdateOrDlcPkg(p)))
             {
-                var into = PlayStationImporter.ExtrasFolderFor(ExtrasRoot, pkg);
+                var into = PlayStationImporter.ExtrasTargetFor(ExtrasRoot, pkg);
                 var to = Path.Combine(into, Path.GetFileName(pkg));
                 if (File.Exists(to)) continue;
                 try
@@ -342,7 +405,7 @@ namespace RetroArr.Core.Games
             foreach (var pkg in pkgs.Where(p => !RecentlyWritten(p)))
             {
                 var to = PlayStationImporter.IsUpdateOrDlcPkg(pkg)
-                    ? Path.Combine(PlayStationImporter.ExtrasFolderFor(ExtrasRoot, pkg), Path.GetFileName(pkg))
+                    ? Path.Combine(PlayStationImporter.ExtrasTargetFor(ExtrasRoot, pkg), Path.GetFileName(pkg))
                     : Path.Combine(folder, PlayStationImporter.PkgFolder, Path.GetFileName(pkg));
                 if (File.Exists(to)) continue;
                 try

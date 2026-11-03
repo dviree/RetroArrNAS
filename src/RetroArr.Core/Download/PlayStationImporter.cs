@@ -84,6 +84,17 @@ namespace RetroArr.Core.Download
             return ExtrasFolderFor(root, PlayStationPackageInspector.Inspect(pkg).Content);
         }
 
+        /// <summary>The game in a name of ours: "Sackboy A Big Adventure" from "Sackboy A Big Adventure [PPSA01289] [DLC ...].pkg"; null otherwise.</summary>
+        internal static string? GameOfName(string name)
+        {
+            var m = Regex.Match(name, @"^(.+?) \[(?:PPSA|CUSA|ECAS)\d{5}\]", RegexOptions.IgnoreCase);
+            return m.Success && SafeTitle(m.Groups[1].Value) is { Length: > 0 } game ? game : null;
+        }
+
+        /// <summary>Where an update or DLC PKG goes: updates/ or dlc/, in its game's folder when its name says the game.</summary>
+        internal static string ExtrasTargetFor(string root, string pkg) =>
+            GameOfName(Path.GetFileName(pkg)) is { } game ? Path.Combine(ExtrasFolderFor(root, pkg), game) : ExtrasFolderFor(root, pkg);
+
         internal static string ExtrasFolderFor(string root, PlayStationContent? content) => Path.Combine(root,
             content == PlayStationContent.Update ? UpdatesFolder : content == PlayStationContent.Dlc ? DlcFolder : BackportFolder);
 
@@ -321,7 +332,7 @@ namespace RetroArr.Core.Download
             var title = await TitleForAsync(package, source, releaseName, from, platformPath);
             // A PS5 update or DLC goes with the backports, outside the library
             if (package.Format == PlayStationFormat.Pkg && IsPs5(platformFolder) && package.Content is PlayStationContent.Update or PlayStationContent.Dlc)
-                folder = ExtrasFolderFor(BackportRoot, package.Content);
+                folder = Path.Combine(ExtrasFolderFor(BackportRoot, package.Content), SafeTitle(title) is { Length: > 0 } game ? game : "");
             // A PS4 PKG goes into its game's folder, with the game's other PKGs: roms/ps4/<Game> [CUSA01234]/
             var ps4Pkg = package.Format == PlayStationFormat.Pkg && !IsPs5(platformFolder) && package.TitleId != null;
             if (ps4Pkg)

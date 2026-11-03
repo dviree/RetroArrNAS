@@ -123,8 +123,8 @@ namespace RetroArr.Core.Test.Games
 
             await _namer.RunOnceAsync();
 
-            Assert.That(Directory.EnumerateFiles(Path.Combine(_namer.ExtrasRoot, "dlc")).Select(Path.GetFileName), Is.EquivalentTo(files.Take(2).Select(Path.GetFileName)));
-            Assert.That(Directory.EnumerateFiles(Path.Combine(_namer.ExtrasRoot, "updates")).Select(Path.GetFileName), Is.EqualTo(new[] { Path.GetFileName(files[2]) }));
+            Assert.That(Directory.EnumerateFiles(Path.Combine(_namer.ExtrasRoot, "dlc", "Sackboy A Big Adventure")).Select(Path.GetFileName), Is.EquivalentTo(files.Take(2).Select(Path.GetFileName)));
+            Assert.That(Directory.EnumerateFiles(Path.Combine(_namer.ExtrasRoot, "updates", "Onimusha")).Select(Path.GetFileName), Is.EqualTo(new[] { Path.GetFileName(files[2]) }));
             Assert.That(Directory.EnumerateFiles(_namer.ExtrasRoot), Is.Empty, "nothing loose in the extras folder");
             Assert.That(File.Exists(game), Is.True, "a game PKG stays in pkg");
             Assert.That(Directory.Exists(oldDlcFolder), Is.False, "the emptied DLC folder goes");
@@ -207,7 +207,7 @@ namespace RetroArr.Core.Test.Games
 
             await _namer.RunOnceAsync();
 
-            Assert.That(File.Exists(Path.Combine(_namer.ExtrasRoot, "dlc", Path.GetFileName(dlc))), Is.True);
+            Assert.That(File.Exists(Path.Combine(_namer.ExtrasRoot, "dlc", "Sackboy A Big Adventure", Path.GetFileName(dlc))), Is.True);
             Assert.That(Directory.Exists(Path.Combine(_ps5, "pkg", "dlc")), Is.False);
             Assert.That(Directory.Exists(Path.Combine(_ps5, "pkg")), Is.True);
         }
@@ -235,9 +235,9 @@ namespace RetroArr.Core.Test.Games
 
             _namer.SortOverride = true;
             await _namer.RunOnceAsync();
-            Assert.That(File.Exists(Path.Combine(_namer.ExtrasRoot, "updates", Path.GetFileName(update))), Is.True);
-            Assert.That(File.Exists(Path.Combine(_namer.ExtrasRoot, "dlc", Path.GetFileName(dlc))), Is.True);
-            Assert.That(File.Exists(Path.Combine(_namer.ExtrasRoot, "backport", "Stray PPSA02100 Backport 4.xx", "fix.pkg")), Is.True);
+            Assert.That(File.Exists(Path.Combine(_namer.ExtrasRoot, "updates", "Onimusha", Path.GetFileName(update))), Is.True);
+            Assert.That(File.Exists(Path.Combine(_namer.ExtrasRoot, "dlc", "Sackboy A Big Adventure", Path.GetFileName(dlc))), Is.True);
+            Assert.That(File.Exists(Path.Combine(_namer.ExtrasRoot, "backport", "Stray", "Stray PPSA02100 Backport 4.xx", "fix.pkg")), Is.True, "each game's backports in its folder");
             Assert.That(Directory.EnumerateFileSystemEntries(_namer.ExtrasRoot).Select(Path.GetFileName), Is.EquivalentTo(new[] { "backport", "updates", "dlc" }));
         }
 
@@ -302,20 +302,21 @@ namespace RetroArr.Core.Test.Games
             config.SaveMediaSettings(media);
             var namer = new PlayStationLibraryNamer(config, trash: new TrashService(config)) { ExtrasRoot = _namer.ExtrasRoot };
             var dlcFolder = Directory.CreateDirectory(Path.Combine(namer.ExtrasRoot, "dlc")).FullName;
-            File.WriteAllText(Path.Combine(dlcFolder, "Sackboy A Big Adventure [PPSA01289] [DLC SABAAPPLE0000001].pkg"), "apple");
+            var named = Path.Combine(dlcFolder, "Sackboy A Big Adventure [PPSA01289] [DLC SABAAPPLE0000001].pkg");
+            File.WriteAllText(named, "apple");
             var copy = Path.Combine(dlcFolder, "UP9000-PPSA01289_00-SABAAPPLE0000001.pkg");
             File.WriteAllText(copy, "apple");
             var other = Path.Combine(_ps5, "pkg", "UP9000-PPSA01289_00-SABAPRIDE0000001.pkg");
             Directory.CreateDirectory(Path.GetDirectoryName(other)!);
             File.WriteAllText(other, "pride");
-            foreach (var f in new[] { copy, other }) File.SetLastWriteTimeUtc(f, DateTime.UtcNow.AddDays(-1));
+            foreach (var f in new[] { named, copy, other }) File.SetLastWriteTimeUtc(f, DateTime.UtcNow.AddDays(-1));
 
             await namer.RunOnceAsync();
             await namer.RunOnceAsync();
 
             Assert.That(File.Exists(copy), Is.False, "the copy went to the trash");
             Assert.That(Directory.EnumerateFiles(Path.Combine(_root, "bin"), "*.pkg", SearchOption.AllDirectories).Count(), Is.EqualTo(1));
-            Assert.That(Directory.EnumerateFiles(dlcFolder).Select(Path.GetFileName), Is.EquivalentTo(new[]
+            Assert.That(Directory.EnumerateFiles(Path.Combine(dlcFolder, "Sackboy A Big Adventure")).Select(Path.GetFileName), Is.EquivalentTo(new[]
             {
                 "Sackboy A Big Adventure [PPSA01289] [DLC SABAAPPLE0000001].pkg",
                 "Sackboy A Big Adventure [PPSA01289] [DLC SABAPRIDE0000001].pkg",
