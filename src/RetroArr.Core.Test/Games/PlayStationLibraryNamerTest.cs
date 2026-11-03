@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using RetroArr.Core.Configuration;
+using RetroArr.Core.Download;
 using RetroArr.Core.Games;
 
 namespace RetroArr.Core.Test.Games
@@ -348,6 +349,33 @@ namespace RetroArr.Core.Test.Games
             Assert.That(Directory.EnumerateFiles(a).Select(Path.GetFileName), Is.EquivalentTo(new[] { "base.pkg", "update.pkg" }));
             Assert.That(Directory.EnumerateFiles(Path.Combine(_root, "bin"), "*.pkg", SearchOption.AllDirectories).Count(), Is.EqualTo(1), "the second base.pkg");
             namer.Dispose();
+        }
+
+        [TestCase("UP9000-PPSA01289_00-SABAAPPLE0000001.pkg", null, "dlc")]
+        [TestCase("Sackboy A Big Adventure [PPSA01289] [v1.24].pkg", null, "updates")]
+        [TestCase("sackboy-patch.pkg", "PPSA01289", "updates")]
+        public async Task ASmallPs5Pkg_IsAnUpdateOrDlc_ByItsSize(string file, string? folderId, string kind)
+        {
+            PlayStationImporter.SmallPkg = 1L << 30;
+            try
+            {
+                var dlcFolder = Directory.CreateDirectory(Path.Combine(_namer.ExtrasRoot, "dlc", "Sackboy A Big Adventure")).FullName;
+                File.WriteAllText(Path.Combine(dlcFolder, "Sackboy A Big Adventure [PPSA01289] [DLC SABAKRATOS000001].pkg"), "dlc");
+                var pkgFolder = Directory.CreateDirectory(Path.Combine(_ps5, "pkg", folderId ?? "")).FullName;
+                var pkg = Path.Combine(pkgFolder, file);
+                File.WriteAllText(pkg, "small");
+                File.SetLastWriteTimeUtc(pkg, DateTime.UtcNow.AddDays(-1));
+                Assert.That(PlayStationImporter.IsUpdateOrDlcPkg(pkg), Is.True, "by its size: the title ID is in its name or its folder's");
+
+                await _namer.RunOnceAsync();
+                await _namer.RunOnceAsync();
+
+                var landed = Directory.EnumerateFiles(Path.Combine(_namer.ExtrasRoot, kind), "*.pkg", SearchOption.AllDirectories)
+                    .Select(f => Path.GetRelativePath(_namer.ExtrasRoot, f)).ToList();
+                Assert.That(landed, Has.Some.StartsWith(Path.Combine(kind, "Sackboy A Big Adventure") + Path.DirectorySeparatorChar)
+                    .And.Some.Contains(kind == "dlc" ? "[DLC SABAAPPLE0000001]" : file.StartsWith("Sackboy", StringComparison.Ordinal) ? "[v1.24]" : "[Update]"), string.Join(", ", landed));
+            }
+            finally { PlayStationImporter.SmallPkg = 0; }
         }
 
         [Test]

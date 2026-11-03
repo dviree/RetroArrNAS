@@ -376,7 +376,11 @@ namespace RetroArr.Core.Games
             foreach (var pkg in pkgs.Where(p => !RecentlyWritten(p) && PlayStationImporter.IsUpdateOrDlcPkg(p)))
             {
                 var into = PlayStationImporter.ExtrasTargetFor(ExtrasRoot, pkg);
-                var to = Path.Combine(into, Path.GetFileName(pkg));
+                // A title ID only its folder's name carried ("PPSA01289/patch.pkg") goes with it, so it can still be named
+                var fileName = Path.GetFileName(pkg);
+                if (PlayStationPackageInspector.TitleIdIn(fileName).Length == 0 && PlayStationPackageInspector.Inspect(pkg).TitleId is { Length: > 0 } folderId)
+                    fileName = folderId + " " + fileName;
+                var to = Path.Combine(into, fileName);
                 if (File.Exists(to)) continue;
                 try
                 {
@@ -496,6 +500,10 @@ namespace RetroArr.Core.Games
             // A PS4 game folder holds every PKG of the game: "<Game> [CUSA01234]", no version
             if (Directory.Exists(entry) && _ps4Folders.Contains(Path.GetDirectoryName(entry)!))
                 return PlayStationImporter.SafeTitle(title) + " [" + id + "]";
+            // An update or DLC PKG says so in its name ("[DLC ...]", "[Update]"), also one known only by its size
+            if (File.Exists(entry) && package.Format == PlayStationFormat.Pkg && package.Content == PlayStationContent.Game
+                && PlayStationImporter.ExtrasKind(entry, package) is { } kind)
+                package = package with { Content = kind };
             var extension = File.Exists(entry) ? Path.GetExtension(name).ToLowerInvariant() : string.Empty;
             var suffix = Regex.IsMatch(name, @"(?i)[-_ ]lz4$") ? "-lz4" : string.Empty;
             var version = package.Version ?? PlayStationImporter.VersionInName(name);

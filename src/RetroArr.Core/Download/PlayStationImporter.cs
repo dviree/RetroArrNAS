@@ -76,12 +76,31 @@ namespace RetroArr.Core.Download
         internal static readonly string[] ExtrasFolders = { BackportFolder, UpdatesFolder, DlcFolder };
 
         /// <summary>Where an update or DLC PKG goes in the extras folder: updates/ or dlc/, by its name or else its package.</summary>
-        internal static string ExtrasFolderFor(string root, string pkg)
+        internal static string ExtrasFolderFor(string root, string pkg) => ExtrasFolderFor(root, ExtrasKind(pkg));
+
+        /// <summary>A PS5 game PKG is many GB: one under this with a PS5 title ID is an update or a DLC.</summary>
+        internal static long SmallPkg = 1L << 30;
+
+        /// <summary>
+        /// Update or Dlc for a PKG that is one, null for a game: its name ("[Update]", "[DLC ...]"), else its own header,
+        /// else its size. A PS5 PKG under 1 GB is an update when its name or version says so (update, patch, a version
+        /// past 1.0), else a DLC. PS5 headers ("7F 46 49 48") are not readable, so the size is what tells them apart.
+        /// </summary>
+        internal static PlayStationContent? ExtrasKind(string pkg, PlayStationPackage? package = null)
         {
             var name = Path.GetFileName(pkg);
-            if (Regex.IsMatch(name, @"\[Update\b", RegexOptions.IgnoreCase)) return Path.Combine(root, UpdatesFolder);
-            if (Regex.IsMatch(name, @"\[DLC\b", RegexOptions.IgnoreCase)) return Path.Combine(root, DlcFolder);
-            return ExtrasFolderFor(root, PlayStationPackageInspector.Inspect(pkg).Content);
+            if (Regex.IsMatch(name, @"\[Update\b", RegexOptions.IgnoreCase)) return PlayStationContent.Update;
+            if (Regex.IsMatch(name, @"\[DLC\b", RegexOptions.IgnoreCase)) return PlayStationContent.Dlc;
+            package ??= PlayStationPackageInspector.Inspect(pkg);
+            if (package.Content is PlayStationContent.Update or PlayStationContent.Dlc) return package.Content;
+            if (package.Format != PlayStationFormat.Pkg || PlatformForTitleId(package.TitleId) != "ps5") return null;
+            long size;
+            try { size = new FileInfo(pkg).Length; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+            if (size >= SmallPkg) return null;
+            var version = NormalizeVersion(package.Version ?? VersionInName(name));
+            return Regex.IsMatch(name, @"(?i)(?<![a-z])(update|patch)(?![a-z])") || (version.Length > 0 && version is not ("1" or "1.0" or "1.00"))
+                ? PlayStationContent.Update : PlayStationContent.Dlc;
         }
 
         /// <summary>The game in a name of ours: "Sackboy A Big Adventure" from "Sackboy A Big Adventure [PPSA01289] [DLC ...].pkg"; null otherwise.</summary>
@@ -99,12 +118,7 @@ namespace RetroArr.Core.Download
             content == PlayStationContent.Update ? UpdatesFolder : content == PlayStationContent.Dlc ? DlcFolder : BackportFolder);
 
         /// <summary>An update or DLC PKG, by its name ("[Update]", "[DLC ...]") or else by the package itself.</summary>
-        internal static bool IsUpdateOrDlcPkg(string pkg)
-        {
-            var name = Path.GetFileName(pkg);
-            if (Regex.IsMatch(name, @"\[(Update|DLC)\b", RegexOptions.IgnoreCase)) return true;
-            return PlayStationPackageInspector.Inspect(pkg).Content is PlayStationContent.Update or PlayStationContent.Dlc;
-        }
+        internal static bool IsUpdateOrDlcPkg(string pkg) => ExtrasKind(pkg) != null;
 
         /// <summary>
         /// The folder in roms/ps4 that holds every PKG of a PS4 game (base, updates, DLC): one whose name carries the
@@ -331,7 +345,10 @@ namespace RetroArr.Core.Download
             Directory.CreateDirectory(platformPath);
             var title = await TitleForAsync(package, source, releaseName, from, platformPath);
             // A PS5 update or DLC goes with the backports, outside the library
-            if (package.Format == PlayStationFormat.Pkg && IsPs5(platformFolder) && package.Content is PlayStationContent.Update or PlayStationContent.Dlc)
+            // (a small PS5 PKG with no readable header is one too, by its size)
+            var extrasKind = package.Format == PlayStationFormat.Pkg && IsPs5(platformFolder) ? ExtrasKind(from, package) : null;
+            if (extrasKind != null) package = package with { Content = extrasKind.Value };
+            if (extrasKind != null)
                 folder = Path.Combine(ExtrasFolderFor(BackportRoot, package.Content), SafeTitle(title) is { Length: > 0 } game ? game : "");
             // A PS4 PKG goes into its game's folder, with the game's other PKGs: roms/ps4/<Game> [CUSA01234]/
             var ps4Pkg = package.Format == PlayStationFormat.Pkg && !IsPs5(platformFolder) && package.TitleId != null;
