@@ -174,19 +174,8 @@ namespace RetroArr.Core.Games
         private string LibraryTitle(string id) => LibraryTitleOf(id).Title;
 
         // The title, and whether only DLC carry this ID (a DLC's own ID: PPSA01289 for Sackboy's DLC, PPSA01288 the game)
-        private (string Title, bool OnlyDlc) LibraryTitleOf(string id)
-        {
-            var tag = " [" + id + "]";
-            var names = Folders().Where(Directory.Exists).SelectMany(f => Directory.EnumerateFileSystemEntries(f).Select(Path.GetFileName))
-                .Where(n => n != null && !n.StartsWith('.') && !NeedsName(n!) && n!.Contains(tag, StringComparison.OrdinalIgnoreCase))
-                .OrderBy(n => n, StringComparer.Ordinal).ToList();
-            // The game's own entries first; a DLC of ours carries the game's name too ("Sackboy A Big Adventure [PPSA01289] [DLC ...]")
-            static bool IsDlc(string? n) => n!.Contains("[DLC", StringComparison.OrdinalIgnoreCase);
-            foreach (var name in names.Where(n => !IsDlc(n)).Concat(names.Where(IsDlc)))
-                if (name![..name!.IndexOf(tag, StringComparison.OrdinalIgnoreCase)].Trim() is { Length: > 0 } title)
-                    return (title, names.All(IsDlc));
-            return (string.Empty, false);
-        }
+        private (string Title, bool OnlyDlc) LibraryTitleOf(string id) =>
+            PlayStationImporter.KnownTitle(id, Folders(), NeedsName);
 
         /// <summary>On unless PS4_MERGE=false (then it only logs what it would do): the owner asked for one folder per game.</summary>
         public static bool MergePs4 => !string.Equals(Environment.GetEnvironmentVariable("PS4_MERGE"), "false", StringComparison.OrdinalIgnoreCase);

@@ -110,6 +110,30 @@ namespace RetroArr.Core.Test.Download
         }
 
         [Test]
+        public async Task ARawDlc_TakesTheNameMostOfItsIdGive_AndIsNeverRejectedAsTheGame()
+        {
+            PlayStationImporter.SmallPkg = 1L << 30;
+            try
+            {
+                var sackboy = Directory.CreateDirectory(Path.Combine(_importer.BackportRoot, "dlc", "Sackboy A Big Adventure")).FullName;
+                foreach (var label in new[] { "SABAAPPLE0000001", "SABAKRATOS000001", "SABACLANK0000001" })
+                    File.WriteAllText(Path.Combine(sackboy, $"Sackboy A Big Adventure [PPSA01289] [DLC {label}].pkg"), label);
+                Directory.CreateDirectory(Path.Combine(Ps5, "pkg"));
+                File.WriteAllText(Path.Combine(Ps5, "pkg", "Sable [PPSA01289].pkg"), "a wrong name from before");
+                var raw = Path.Combine(_inbox, "UP9000-PPSA01289_00-SABAEVEN00000001.pkg");
+                File.WriteAllText(raw, "even");
+
+                var result = await Import(raw);
+
+                Assert.That(result.Success, Is.True, result.Reason);
+                Assert.That(result.AlreadyInLibrary, Is.False, "a DLC is not \"the game, already there\"");
+                Assert.That(File.Exists(Path.Combine(sackboy, "Sackboy A Big Adventure [PPSA01289] [DLC SABAEVEN00000001].pkg")), Is.True,
+                    string.Join(", ", Directory.EnumerateFiles(_root, "*.pkg", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(_root, f))));
+            }
+            finally { PlayStationImporter.SmallPkg = 0; }
+        }
+
+        [Test]
         public async Task DlcAndUpdates_NeverReplaceTheGame()
         {
             Directory.CreateDirectory(Ps5);

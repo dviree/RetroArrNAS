@@ -103,6 +103,47 @@ namespace RetroArr.Core.Download
                 ? PlayStationContent.Update : PlayStationContent.Dlc;
         }
 
+        /// <summary>The extras folder, its three folders and the game folders in updates/ and dlc/.</summary>
+        internal static IEnumerable<string> ExtrasFoldersIn(string root)
+        {
+            yield return root;
+            foreach (var sub in ExtrasFolders)
+            {
+                var kind = Path.Combine(root, sub);
+                yield return kind;
+                if (sub == BackportFolder || !Directory.Exists(kind)) continue;
+                string[] games;
+                try { games = Directory.GetDirectories(kind); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
+                foreach (var game in games.Where(g => !Path.GetFileName(g).StartsWith('.'))) yield return game;
+            }
+        }
+
+        /// <summary>
+        /// The game's name for a title ID from the names in these folders ("Sackboy A Big Adventure [PPSA01289] [DLC ...]"):
+        /// the one most of them give, the game's own entries first on a tie, so one wrong name ("Sable") does not win.
+        /// OnlyDlc: every entry of the ID is a DLC (a DLC's own ID, PPSA01289 for Sackboy's DLC, PPSA01288 the game).
+        /// </summary>
+        internal static (string Title, bool OnlyDlc) KnownTitle(string titleId, IEnumerable<string> folders, Func<string, bool>? skip = null)
+        {
+            var tag = " [" + titleId + "]";
+            var names = new List<string>();
+            foreach (var f in folders.Distinct(StringComparer.Ordinal).Where(Directory.Exists))
+                try
+                {
+                    names.AddRange(Directory.EnumerateFileSystemEntries(f).Select(Path.GetFileName).OfType<string>()
+                        .Where(n => !n.StartsWith('.') && n.Contains(tag, StringComparison.OrdinalIgnoreCase) && (skip == null || !skip(n))));
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            static bool IsDlc(string n) => n.Contains("[DLC", StringComparison.OrdinalIgnoreCase);
+            var best = names.Select(n => (Title: SafeTitle(n[..n.IndexOf(tag, StringComparison.OrdinalIgnoreCase)]), Dlc: IsDlc(n)))
+                .Where(t => t.Title.Length > 0)
+                .GroupBy(t => t.Title, StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(g => g.Count()).ThenBy(g => g.All(t => t.Dlc) ? 1 : 0).ThenBy(g => g.Key, StringComparer.Ordinal)
+                .FirstOrDefault();
+            return best == null ? (string.Empty, false) : (best.First().Title, names.All(IsDlc));
+        }
+
         /// <summary>The game in a name of ours: "Sackboy A Big Adventure" from "Sackboy A Big Adventure [PPSA01289] [DLC ...].pkg"; null otherwise.</summary>
         internal static string? GameOfName(string name)
         {
@@ -431,15 +472,10 @@ namespace RetroArr.Core.Download
         {
             var own = SafeTitle(package.Title);
             if (own.Length > 0) return own;
-            if (package.TitleId != null)
-            {
-                var tag = " [" + package.TitleId + "]";
-                var known = Directory.EnumerateFileSystemEntries(folder).Select(Path.GetFileName)
-                    .Where(n => n != null && !n.StartsWith('.') && n.Contains(tag, StringComparison.OrdinalIgnoreCase))
-                    .Select(n => n![..n!.IndexOf(tag, StringComparison.OrdinalIgnoreCase)].Trim())
-                    .FirstOrDefault(t => t.Length > 0);
-                if (known != null) return known;
-            }
+            // The name the library already gives this ID, in roms, its pkg folder and the extras folders: before the AI,
+            // which guesses each file from its name alone ("SABAEVEN..." became "Sable")
+            if (package.TitleId != null && KnownTitle(package.TitleId, new[] { folder, Path.Combine(folder, PkgFolder) }.Concat(ExtrasFoldersIn(BackportRoot))).Title is { Length: > 0 } known)
+                return known;
             if (_ai is { IsEnabled: true })
             {
                 var files = Directory.Exists(source)
