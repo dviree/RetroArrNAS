@@ -177,8 +177,8 @@ namespace RetroArr.Core.Games
             return (string.Empty, false);
         }
 
-        /// <summary>PS4_MERGE=true merges two PS4 folders of one game; anything else only logs what it would do.</summary>
-        public static bool MergePs4 => string.Equals(Environment.GetEnvironmentVariable("PS4_MERGE"), "true", StringComparison.OrdinalIgnoreCase);
+        /// <summary>On unless PS4_MERGE=false (then it only logs what it would do): the owner asked for one folder per game.</summary>
+        public static bool MergePs4 => !string.Equals(Environment.GetEnvironmentVariable("PS4_MERGE"), "false", StringComparison.OrdinalIgnoreCase);
 
         internal bool? MergeOverride;
 
@@ -186,7 +186,7 @@ namespace RetroArr.Core.Games
         private readonly HashSet<string> _otherCopies = new(StringComparer.Ordinal);
 
         // Two folders in roms/ps4 for one title ID (two releases of it) become one: what the others hold moves into the
-        // best-named one, never over a file of the same name, and a folder left empty goes. Off unless PS4_MERGE=true.
+        // best-named one, never over a file of the same name, and a folder left empty goes. PS4_MERGE=false keeps it a dry run.
         private void MergePs4Duplicates(string ps4, List<(string, string)> done)
         {
             List<(string Dir, string Id)> dirs;
@@ -204,11 +204,19 @@ namespace RetroArr.Core.Games
                 var target = ordered[0];
                 foreach (var other in ordered.Skip(1))
                 {
-                    if (!merge) { _otherCopies.Add(other); _logger.Info($"[PSNames] Dry run: would merge {other} into {target} (PS4_MERGE=true does it)"); continue; }
+                    if (!merge) { _otherCopies.Add(other); _logger.Info($"[PSNames] Dry run: would merge {other} into {target} (PS4_MERGE=false keeps it a dry run)"); continue; }
                     foreach (var item in Directory.EnumerateFileSystemEntries(other).ToList())
                     {
                         var to = Path.Combine(target, Path.GetFileName(item));
-                        if (File.Exists(to) || Directory.Exists(to)) { _logger.Info($"[PSNames] {to} is there already, {item} stays"); continue; }
+                        if (File.Exists(to) || Directory.Exists(to))
+                        {
+                            // The same file in the game's folder already: this one is a copy and goes to the trash
+                            if (File.Exists(item) && File.Exists(to) && new FileInfo(item).Length == new FileInfo(to).Length && _trash != null
+                                && _trash.MoveAsync(item, null, Path.GetFileName(item)).GetAwaiter().GetResult() != null)
+                                _logger.Info($"[PSNames] {item} is a copy of {to}; it went to the trash");
+                            else _logger.Info($"[PSNames] {to} is there already, {item} stays");
+                            continue;
+                        }
                         try { Rename(item, to); done.Add((item, to)); }
                         catch (Exception ex) { _logger.Warn($"[PSNames] Could not move {item}: {ex.Message}"); }
                     }

@@ -324,6 +324,32 @@ namespace RetroArr.Core.Test.Games
         }
 
         [Test]
+        public async Task TwoPs4FoldersOfOneGame_BecomeOneByDefault_TheCopyGoesToTheTrash()
+        {
+            var config = new ConfigurationService(_root);
+            var media = config.LoadMediaSettings();
+            media.TrashPath = Path.Combine(_root, "bin");
+            config.SaveMediaSettings(media);
+            var namer = new PlayStationLibraryNamer(config, trash: new TrashService(config)) { ExtrasRoot = _namer.ExtrasRoot };
+            Assert.That(PlayStationLibraryNamer.MergePs4, Is.True, "on unless PS4_MERGE=false");
+            var ps4 = Directory.CreateDirectory(namer.Folders().First(f => f.EndsWith("ps4", StringComparison.Ordinal))).FullName;
+            var a = Directory.CreateDirectory(Path.Combine(ps4, "Ghostbusters The Video Game Remastered [CUSA15558]")).FullName;
+            var b = Directory.CreateDirectory(Path.Combine(ps4, "Ghostbusters.The.Video.Game.Remastered_CUSA15558_v1.00_[6.72]_GROUP")).FullName;
+            foreach (var f in new[] { Path.Combine(a, "base.pkg"), Path.Combine(b, "base.pkg"), Path.Combine(b, "update.pkg") })
+            {
+                File.WriteAllText(f, "pkg");
+                File.SetLastWriteTimeUtc(f, DateTime.UtcNow.AddDays(-1));
+            }
+
+            await namer.RunOnceAsync();
+
+            Assert.That(Directory.EnumerateDirectories(ps4).Select(Path.GetFileName), Is.EqualTo(new[] { "Ghostbusters The Video Game Remastered [CUSA15558]" }));
+            Assert.That(Directory.EnumerateFiles(a).Select(Path.GetFileName), Is.EquivalentTo(new[] { "base.pkg", "update.pkg" }));
+            Assert.That(Directory.EnumerateFiles(Path.Combine(_root, "bin"), "*.pkg", SearchOption.AllDirectories).Count(), Is.EqualTo(1), "the second base.pkg");
+            namer.Dispose();
+        }
+
+        [Test]
         public async Task NamedOrBusyFolders_AreLeftAlone()
         {
             Game(_lz4, "FINAL FANTASY VII REMAKE [PPSA01903] [v1.5]-lz4");

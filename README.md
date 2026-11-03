@@ -57,7 +57,7 @@ This fork adds what a download-and-sort pipeline on a NAS needs, so no scripts r
 | `PS_BACKPORT_FOLDER` | `/nas/games/backport-updates-dlc` | Where PS5 updates, DLC and backports are kept |
 | `PS_RENAME` | `true` | Give PS entries that are only a title ID, or a release name, the game's name |
 | `PS_EXTRAS_SORT` | `true` | Sorts what lies loose in the backport-updates-dlc folder into its `backport/`, `updates/` and `dlc/` folders; `false` only writes `extras-sort-plan.log` |
-| `PS4_MERGE` | dry run | `true` merges two roms/ps4 folders of one game into one; otherwise only logged |
+| `PS4_MERGE` | `true` | Merges two roms/ps4 folders of one game into one (a same-size copy goes to the trash); `false` only logs it |
 | `PS_HOLD_FILE` | - | A file that pauses PS imports while it exists |
 | `SWITCH_KEYS_FILE` | `/app/config/switch/prod.keys` | Your own keys; merging is off without them |
 | `SWITCH_NSCB_RUST`, `SWITCH_NSCB_RUST_URL` | `/app/config/switch/nscb_rust`, pinned release | The merger and where it is fetched from |
