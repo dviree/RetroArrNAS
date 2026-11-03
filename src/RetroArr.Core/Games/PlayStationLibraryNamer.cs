@@ -193,6 +193,22 @@ namespace RetroArr.Core.Games
             return !string.Equals(best.Key, game, StringComparison.OrdinalIgnoreCase) && best.Value >= 3 && best.Value >= 2 * votes.GetValueOrDefault(game);
         }
 
+        /// <summary>
+        /// The game folder a file belongs in: the game its name says, unless a clear majority of its title ID says
+        /// another ("Sable [PPSA01289].pkg" goes in "Sackboy A Big Adventure", never in a "Sable" folder).
+        /// </summary>
+        private string? GameFolderFor(string file)
+        {
+            var name = Path.GetFileName(file);
+            var own = PlayStationImporter.GameOfName(name);
+            if (own == null || !TitleDisagrees(file)) return own;
+            return _votes[PlayStationPackageInspector.TitleIdIn(name)].OrderByDescending(v => v.Value).First().Key;
+        }
+
+        // updates/<Game> or dlc/<Game> for an update or DLC PKG
+        private string TargetFor(string pkg) =>
+            GameFolderFor(pkg) is { } game ? Path.Combine(PlayStationImporter.ExtrasFolderFor(ExtrasRoot, pkg), game) : PlayStationImporter.ExtrasFolderFor(ExtrasRoot, pkg);
+
         private (string Title, bool OnlyDlc) LibraryTitleOf(string id) =>
             PlayStationImporter.KnownTitle(id, Folders(), NeedsName);
 
@@ -303,7 +319,7 @@ namespace RetroArr.Core.Games
             foreach (var entry in loose)
             {
                 var into = File.Exists(entry) && entry.EndsWith(".pkg", StringComparison.OrdinalIgnoreCase) && PlayStationImporter.IsUpdateOrDlcPkg(entry)
-                    ? PlayStationImporter.ExtrasTargetFor(ExtrasRoot, entry)
+                    ? TargetFor(entry)
                     : Path.Combine(ExtrasRoot, PlayStationImporter.BackportFolder);
                 var to = Path.Combine(into, Path.GetFileName(entry));
                 if (File.Exists(to) || Directory.Exists(to)) { SortPlan.Add($"KEEP {entry} ({to} is there already)"); continue; }
@@ -344,7 +360,7 @@ namespace RetroArr.Core.Games
                     loose = (backport ? Directory.EnumerateFileSystemEntries(kind) : Directory.EnumerateFiles(kind)
                             // and a file in another game's folder ("dlc/Sable/Sackboy A Big Adventure [PPSA01289] ...")
                             .Concat(Directory.EnumerateDirectories(kind).SelectMany(d => Directory.EnumerateFiles(d)
-                                .Where(f => PlayStationImporter.GameOfName(Path.GetFileName(f)) is { } g && !string.Equals(g, Path.GetFileName(d), StringComparison.OrdinalIgnoreCase)))))
+                                .Where(f => GameFolderFor(f) is { } g && !string.Equals(g, Path.GetFileName(d), StringComparison.OrdinalIgnoreCase)))))
                         .Where(e => !Path.GetFileName(e).StartsWith('.') && !RecentlyWritten(e)).OrderBy(e => e, StringComparer.Ordinal).ToList();
                 }
                 catch (Exception) { continue; }
@@ -352,7 +368,7 @@ namespace RetroArr.Core.Games
                 {
                     var name = Path.GetFileName(entry);
                     string? game;
-                    if (!backport) game = PlayStationImporter.GameOfName(name);
+                    if (!backport) game = GameFolderFor(entry);
                     else
                     {
                         // A backport release names its game by its title ID; a folder without one is a game's folder already
@@ -405,7 +421,7 @@ namespace RetroArr.Core.Games
             var left = new HashSet<string>(StringComparer.Ordinal);
             foreach (var pkg in pkgs.Where(p => !RecentlyWritten(p) && PlayStationImporter.IsUpdateOrDlcPkg(p)))
             {
-                var into = PlayStationImporter.ExtrasTargetFor(ExtrasRoot, pkg);
+                var into = TargetFor(pkg);
                 // A title ID only its folder's name carried ("PPSA01289/patch.pkg") goes with it, so it can still be named
                 var fileName = Path.GetFileName(pkg);
                 if (PlayStationPackageInspector.TitleIdIn(fileName).Length == 0 && PlayStationPackageInspector.Inspect(pkg).TitleId is { Length: > 0 } folderId)
@@ -439,7 +455,7 @@ namespace RetroArr.Core.Games
             foreach (var pkg in pkgs.Where(p => !RecentlyWritten(p)))
             {
                 var to = PlayStationImporter.IsUpdateOrDlcPkg(pkg)
-                    ? Path.Combine(PlayStationImporter.ExtrasTargetFor(ExtrasRoot, pkg), Path.GetFileName(pkg))
+                    ? Path.Combine(TargetFor(pkg), Path.GetFileName(pkg))
                     : Path.Combine(folder, PlayStationImporter.PkgFolder, Path.GetFileName(pkg));
                 if (File.Exists(to)) { TrashIfCopy(pkg, to); continue; }
                 try
