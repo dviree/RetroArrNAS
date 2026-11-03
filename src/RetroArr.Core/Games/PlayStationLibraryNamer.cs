@@ -36,10 +36,13 @@ namespace RetroArr.Core.Games
         // internal for tests: the rename itself, so a read-only mount can be renamed through the shared one
         internal Action<string, string> Rename = Move;
 
-        public PlayStationLibraryNamer(ConfigurationService config, AiTitleService? ai = null)
+        private readonly TrashService? _trash;
+
+        public PlayStationLibraryNamer(ConfigurationService config, AiTitleService? ai = null, TrashService? trash = null)
         {
             _config = config;
             _ai = ai;
+            _trash = trash;
         }
 
         public static bool Enabled =>
@@ -108,7 +111,15 @@ namespace RetroArr.Core.Games
                     var target = await NewNameAsync(entry);
                     if (target == null || target == name) continue;
                     var to = Path.Combine(folder, target);
-                    if (File.Exists(to) || Directory.Exists(to)) { _logger.Info($"[PSNames] {name}: {target} is already there, left as it is"); continue; }
+                    if (File.Exists(to) || Directory.Exists(to))
+                    {
+                        // The same file under its right name already: this one is a copy and goes to the trash
+                        if (File.Exists(entry) && File.Exists(to) && new FileInfo(entry).Length == new FileInfo(to).Length && _trash != null
+                            && await _trash.MoveAsync(entry, null, target) != null)
+                            _logger.Info($"[PSNames] {name} is a copy of {target}; it went to the trash");
+                        else _logger.Info($"[PSNames] {name}: {target} is already there, left as it is");
+                        continue;
+                    }
                     try
                     {
                         Rename(entry, to);
@@ -149,15 +160,21 @@ namespace RetroArr.Core.Games
         }
 
         // The title a well-named entry gives this ID ("Stray" from "Stray [PPSA02100] [v1.0].pkg"), never a release name
-        private string LibraryTitle(string id)
+        private string LibraryTitle(string id) => LibraryTitleOf(id).Title;
+
+        // The title, and whether only DLC carry this ID (a DLC's own ID: PPSA01289 for Sackboy's DLC, PPSA01288 the game)
+        private (string Title, bool OnlyDlc) LibraryTitleOf(string id)
         {
             var tag = " [" + id + "]";
-            foreach (var folder in Folders().Where(Directory.Exists))
-                foreach (var name in Directory.EnumerateFileSystemEntries(folder).Select(Path.GetFileName))
-                    if (name != null && !name.StartsWith('.') && !NeedsName(name) && name.Contains(tag, StringComparison.OrdinalIgnoreCase)
-                        && !name.Contains("[DLC", StringComparison.OrdinalIgnoreCase) && name[..name.IndexOf(tag, StringComparison.OrdinalIgnoreCase)].Trim() is { Length: > 0 } title)
-                        return title;
-            return string.Empty;
+            var names = Folders().Where(Directory.Exists).SelectMany(f => Directory.EnumerateFileSystemEntries(f).Select(Path.GetFileName))
+                .Where(n => n != null && !n.StartsWith('.') && !NeedsName(n!) && n!.Contains(tag, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(n => n, StringComparer.Ordinal).ToList();
+            // The game's own entries first; a DLC of ours carries the game's name too ("Sackboy A Big Adventure [PPSA01289] [DLC ...]")
+            static bool IsDlc(string? n) => n!.Contains("[DLC", StringComparison.OrdinalIgnoreCase);
+            foreach (var name in names.Where(n => !IsDlc(n)).Concat(names.Where(IsDlc)))
+                if (name![..name!.IndexOf(tag, StringComparison.OrdinalIgnoreCase)].Trim() is { Length: > 0 } title)
+                    return (title, names.All(IsDlc));
+            return (string.Empty, false);
         }
 
         /// <summary>PS4_MERGE=true merges two PS4 folders of one game; anything else only logs what it would do.</summary>
@@ -386,13 +403,24 @@ namespace RetroArr.Core.Games
             if (id == null) return null;
             var title = PlayStationImporter.SafeTitle(package.Title);
             // Else the name the library gives that game already, the AI's, or the title in the release name
-            if (title.Length == 0) title = LibraryTitle(id);
+            if (title.Length == 0)
+            {
+                var (known, onlyDlc) = LibraryTitleOf(id);
+                title = known;
+                // A PKG whose header says nothing (no title, no version), with an ID only DLC carry, is one more DLC of that game
+                if (onlyDlc && package.Format == PlayStationFormat.Pkg && package.Content == PlayStationContent.Game
+                    && package.Title == null && package.Version == null)
+                    package = package with { Content = PlayStationContent.Dlc };
+            }
             if (title.Length == 0 && _ai is { IsEnabled: true })
             {
                 var guess = await _ai.IdentifyAsync(name + " " + id, new[] { name });
                 if (guess != null && PlayStationImporter.IsPlayStation(guess.Platform)) title = PlayStationImporter.SafeTitle(guess.Title);
             }
-            if (title.Length == 0) title = PlayStationImporter.CleanReleaseName(Regex.Replace(name, @"\.(exfat|ffpfsc|pkg)$", "", RegexOptions.IgnoreCase));
+            // The title in a release name, only when the name names the game ("Stray [PPSA02100] [VIKINGFILE]"): a name
+            // without a title ID ("sable.pkg") says nothing about which game it is
+            if (title.Length == 0 && PlayStationPackageInspector.TitleIdIn(name).Length > 0)
+                title = PlayStationImporter.CleanReleaseName(Regex.Replace(name, @"\.(exfat|ffpfsc|pkg)$", "", RegexOptions.IgnoreCase));
             if (title.Length == 0) return null;
             // A PS4 game folder holds every PKG of the game: "<Game> [CUSA01234]", no version
             if (Directory.Exists(entry) && _ps4Folders.Contains(Path.GetDirectoryName(entry)!))

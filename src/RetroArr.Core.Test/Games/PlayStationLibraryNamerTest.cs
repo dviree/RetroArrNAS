@@ -25,7 +25,8 @@ namespace RetroArr.Core.Test.Games
             var media = config.LoadMediaSettings();
             media.FolderPath = media.DestinationPath = Path.Combine(_root, "roms");
             config.SaveMediaSettings(media);
-            _namer = new PlayStationLibraryNamer(config);
+            // Never the real default folder: every test has its own
+            _namer = new PlayStationLibraryNamer(config) { ExtrasRoot = Path.Combine(_root, "backport-updates-dlc") };
             _ps5 = Directory.CreateDirectory(_namer.Folders().First()).FullName;
             _lz4 = Directory.CreateDirectory(Path.Combine(_root, "ps5-lz4")).FullName;
             Environment.SetEnvironmentVariable("PS_LIBRARY_EXTRA", _lz4);
@@ -258,6 +259,68 @@ namespace RetroArr.Core.Test.Games
             Assert.That(Directory.EnumerateFiles(pkgFolder).Select(Path.GetFileName), Is.EqualTo(new[] { "Sable [CUSA12345] [v1.5].pkg" }));
             Assert.That(Directory.EnumerateFiles(Path.Combine(_namer.ExtrasRoot, "dlc")).Count(), Is.EqualTo(1), "a DLC by its header, whatever its name");
             Assert.That(PlayStationLibraryNamer.NameSaysNothing(Path.Combine(pkgFolder, "Sable [CUSA12345] [v1.5].pkg")), Is.False);
+        }
+
+        [Test]
+        public async Task APkgWithoutATitle_TakesTheGamesNameFromItsDlc_NeverItsFileName()
+        {
+            _namer.ExtrasRoot = Path.Combine(_root, "backport-updates-dlc");
+            var dlcFolder = Directory.CreateDirectory(Path.Combine(_namer.ExtrasRoot, "dlc")).FullName;
+            File.WriteAllText(Path.Combine(dlcFolder, "Sackboy A Big Adventure [PPSA01289] [DLC SABAKRATOS000001].pkg"), "dlc");
+            var pkgFolder = Directory.CreateDirectory(Path.Combine(_ps5, "pkg")).FullName;
+            var sable = Path.Combine(pkgFolder, "sable.pkg");
+            File.WriteAllBytes(sable, PlayStationReadersTest.Pkg("EP9000-PPSA01289_00-SABAPC0000000001",
+                PlayStationReadersTest.Sfo(("CATEGORY", "gd"), ("TITLE_ID", "PPSA01289"), ("APP_VER", "01.24"))));
+            File.SetLastWriteTimeUtc(sable, DateTime.UtcNow.AddDays(-1));
+
+            await _namer.RunOnceAsync();
+
+            Assert.That(Directory.EnumerateFiles(pkgFolder).Select(Path.GetFileName), Is.EqualTo(new[] { "Sackboy A Big Adventure [PPSA01289] [v1.24].pkg" }),
+                "the game's name, not \"Sable\" from the file name");
+        }
+
+        [Test]
+        public async Task APkgWithoutATitleAnywhere_KeepsItsName()
+        {
+            var pkgFolder = Directory.CreateDirectory(Path.Combine(_ps5, "pkg")).FullName;
+            var sable = Path.Combine(pkgFolder, "sable.pkg");
+            File.WriteAllBytes(sable, PlayStationReadersTest.Pkg("EP9000-PPSA01289_00-SABAPC0000000001",
+                PlayStationReadersTest.Sfo(("CATEGORY", "gd"), ("TITLE_ID", "PPSA01289"), ("APP_VER", "01.24"))));
+            File.SetLastWriteTimeUtc(sable, DateTime.UtcNow.AddDays(-1));
+
+            await _namer.RunOnceAsync();
+
+            Assert.That(File.Exists(sable), Is.True);
+        }
+
+        [Test]
+        public async Task RawDlcNames_GetTheGamesName_AndACopyOfANamedDlcGoesToTheTrash()
+        {
+            var config = new ConfigurationService(_root);
+            var media = config.LoadMediaSettings();
+            media.TrashPath = Path.Combine(_root, "bin");
+            config.SaveMediaSettings(media);
+            var namer = new PlayStationLibraryNamer(config, trash: new TrashService(config)) { ExtrasRoot = _namer.ExtrasRoot };
+            var dlcFolder = Directory.CreateDirectory(Path.Combine(namer.ExtrasRoot, "dlc")).FullName;
+            File.WriteAllText(Path.Combine(dlcFolder, "Sackboy A Big Adventure [PPSA01289] [DLC SABAAPPLE0000001].pkg"), "apple");
+            var copy = Path.Combine(dlcFolder, "UP9000-PPSA01289_00-SABAAPPLE0000001.pkg");
+            File.WriteAllText(copy, "apple");
+            var other = Path.Combine(_ps5, "pkg", "UP9000-PPSA01289_00-SABAPRIDE0000001.pkg");
+            Directory.CreateDirectory(Path.GetDirectoryName(other)!);
+            File.WriteAllText(other, "pride");
+            foreach (var f in new[] { copy, other }) File.SetLastWriteTimeUtc(f, DateTime.UtcNow.AddDays(-1));
+
+            await namer.RunOnceAsync();
+            await namer.RunOnceAsync();
+
+            Assert.That(File.Exists(copy), Is.False, "the copy went to the trash");
+            Assert.That(Directory.EnumerateFiles(Path.Combine(_root, "bin"), "*.pkg", SearchOption.AllDirectories).Count(), Is.EqualTo(1));
+            Assert.That(Directory.EnumerateFiles(dlcFolder).Select(Path.GetFileName), Is.EquivalentTo(new[]
+            {
+                "Sackboy A Big Adventure [PPSA01289] [DLC SABAAPPLE0000001].pkg",
+                "Sackboy A Big Adventure [PPSA01289] [DLC SABAPRIDE0000001].pkg",
+            }), "the raw one got the game's name and went to dlc/, never \"Sable\"");
+            namer.Dispose();
         }
 
         [Test]
