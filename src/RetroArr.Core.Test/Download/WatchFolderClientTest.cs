@@ -108,6 +108,9 @@ namespace RetroArr.Core.Test.Download
         [TestCase("Donkey Kong Bananza (Nintendo Switch 2)/game.nsp", "switch2")]
         [TestCase("Zelda/Zelda (Switch 2 compatible).nsp", "switch")]
         [TestCase("Terraria/Terraria Switch 2.0 Update.nsp", "switch")]
+        [TestCase("The Legend of Zelda Ocarina of Time [0400486024DEC000] [v131072].nup", "switch2")]
+        [TestCase("Some Game [0400486024DEC000].nsp", "switch2")]
+        [TestCase("Zelda [0100F2C0115B6000][v0].nsp", "switch")]
         public async Task Switch2Games_AreKnownByTheirNameOrTheirFilesNames(string file, string platform)
         {
             Write(file);

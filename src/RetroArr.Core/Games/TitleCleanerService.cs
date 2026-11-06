@@ -724,7 +724,7 @@ namespace RetroArr.Core.Games
         // the extras beside them. Anything else after a dot is part of the name: "Update v1.2.0" is a folder.
         private static readonly HashSet<string> _supplementaryFileExtensions = new(StringComparer.OrdinalIgnoreCase)
         {
-            ".nsp", ".nsz", ".xci", ".xcz", ".cia", ".3ds", ".nds", ".gba", ".gbc", ".gb", ".nes", ".sfc", ".smc", ".n64", ".z64", ".v64",
+            ".nsp", ".nsz", ".xci", ".xcz", ".nup", ".cia", ".3ds", ".nds", ".gba", ".gbc", ".gb", ".nes", ".sfc", ".smc", ".n64", ".z64", ".v64",
             ".gcm", ".wbfs", ".wad", ".wua", ".wup", ".pkg", ".rap", ".vpk", ".iso", ".bin", ".cue", ".chd", ".pbp", ".cso", ".xex", ".god",
             ".exe", ".msi", ".dmg", ".app", ".appimage", ".sh", ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".zst", ".tgz",
             ".tbz2", ".txz", ".md", ".smd", ".gen", ".cdi", ".gdi", ".rom", ".img", ".ips", ".bps", ".ups", ".xdelta"

@@ -42,7 +42,7 @@ namespace RetroArr.Core.Download
         // Extensions that name their platform, added to the title as the tag PlatformDetector knows ("Wii Party WBFS")
         private static readonly Dictionary<string, string> ExtensionTags = new(StringComparer.OrdinalIgnoreCase)
         {
-            [".wbfs"] = "WBFS", [".nsp"] = "NSP", [".nsz"] = "NSP", [".xci"] = "XCI", [".xcz"] = "XCI",
+            [".wbfs"] = "WBFS", [".nsp"] = "NSP", [".nsz"] = "NSP", [".xci"] = "XCI", [".xcz"] = "XCI", [".nup"] = "NSW2",
             [".cia"] = "3DS", [".3ds"] = "3DS", [".nds"] = "NDS", [".gba"] = "GBA", [".gbc"] = "GBC", [".gb"] = "Game Boy",
             [".nes"] = "NES", [".sfc"] = "SNES", [".smc"] = "SNES", [".z64"] = "N64", [".n64"] = "N64", [".v64"] = "N64",
             [".wua"] = "Wii U", [".wux"] = "Wii U", [".wud"] = "Wii U", [".gdi"] = "Dreamcast", [".cdi"] = "Dreamcast",
@@ -56,6 +56,8 @@ namespace RetroArr.Core.Download
             (new Regex(@"(?<![A-Za-z0-9])(PPSA|ECAS)[-_]?\d{5}(?!\d)", RegexOptions.IgnoreCase), "PS5"),
             (new Regex(@"(?<![A-Za-z0-9])CUSA[-_]?\d{5}(?!\d)", RegexOptions.IgnoreCase), "PS4"),
             (new Regex(@"\b(BC|BL|NP)[UEJAK][SB]\d{5}\b", RegexOptions.IgnoreCase), "PS3"),
+            // A Switch 2 title ID starts 04 ("[0400486024DEC000]"); a Switch one starts 01
+            (new Regex(@"(?<![0-9A-Fa-f])04[0-9A-Fa-f]{14}(?![0-9A-Fa-f])"), "NSW2"),
         };
 
         private readonly string _folder;
@@ -99,7 +101,7 @@ namespace RetroArr.Core.Download
         {
             ".nes", ".fds", ".sfc", ".smc", ".gb", ".gbc", ".gba", ".nds", ".3ds", ".cia", ".n64", ".z64", ".v64", ".md", ".gen", ".smd",
             ".sms", ".gg", ".32x", ".pce", ".a26", ".a78", ".lnx", ".ws", ".wsc", ".ngp", ".ngc", ".vb", ".iso", ".chd", ".cso", ".rvz",
-            ".gcz", ".wbfs", ".wua", ".nsp", ".nsz", ".xci", ".xcz", ".pbp", ".cue", ".bin", ".gdi", ".cdi", ".zip", ".7z",
+            ".gcz", ".wbfs", ".wua", ".nsp", ".nsz", ".xci", ".xcz", ".nup", ".pbp", ".cue", ".bin", ".gdi", ".cdi", ".zip", ".7z",
             ".exfat", ".ffpfsc", ".pkg"
         };
         private static readonly HashSet<string> PlayStationFiles = new(StringComparer.OrdinalIgnoreCase) { ".exfat", ".ffpfsc", ".pkg" };
@@ -435,7 +437,7 @@ namespace RetroArr.Core.Download
             // A Switch 2 game named so in its files, not its folder ("Mario Kart World/Mario Kart World [NSW2].xci")
             if (fileList.Any(f => (f.Extension.Equals(".nsp", StringComparison.OrdinalIgnoreCase) || f.Extension.Equals(".xci", StringComparison.OrdinalIgnoreCase)
                                    || f.Extension.Equals(".nsz", StringComparison.OrdinalIgnoreCase) || f.Extension.Equals(".xcz", StringComparison.OrdinalIgnoreCase))
-                                  && Games.SwitchMergeService.Switch2Name.IsMatch(f.Name)))
+                                  && Games.SwitchMergeService.IsSwitch2(f.Name)))
                 tags.Add("NSW2");
             // A Windows program and no console files: a PC game (setup.exe, Game.exe, a SteamRIP folder)
             if (tags.Count == 0 && fileList.Any(f => f.Extension.Equals(".exe", StringComparison.OrdinalIgnoreCase))) tags.Add("PC");

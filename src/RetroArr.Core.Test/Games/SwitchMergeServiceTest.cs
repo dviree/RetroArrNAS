@@ -334,12 +334,14 @@ namespace RetroArr.Core.Test.Games
             var mk = Part("Mario Kart World [NSW2].xci", 100);
             var dk = Part("Donkey Kong Bananza (Nintendo Switch 2)/game.nsp", 50);
             var zelda = Part("Zelda (Switch 2 compatible) [0100F2C0115B6000][v0].nsp", 30);
+            var oot = Part("The Legend of Zelda Ocarina of Time [0400486024DEC000] [v131072].nup", 40);
+            var byId = Part("Some Game [0400486024DEC000][v0].nsp", 20);
             var switch2 = Path.Combine(Path.GetDirectoryName(_switch)!, "switch2");
 
             _service.MoveSwitch2Games(_switch);
 
             Assert.That(Directory.Exists(switch2), Is.True, "roms/switch2 is made");
-            Assert.That(Directory.EnumerateFiles(switch2).Select(Path.GetFileName), Is.EquivalentTo(new[] { "Mario Kart World [NSW2].xci", "game.nsp" }));
+            Assert.That(Directory.EnumerateFiles(switch2).Select(Path.GetFileName), Is.EquivalentTo(new[] { "Mario Kart World [NSW2].xci", "game.nsp", Path.GetFileName(oot), Path.GetFileName(byId) }));
             Assert.That(File.Exists(zelda), Is.True, "a Switch game that also runs on a Switch 2 stays");
             Assert.That(File.Exists(mk) || File.Exists(dk), Is.False);
             Assert.That(Directory.Exists(Path.GetDirectoryName(dk)), Is.False, "the emptied folder goes");

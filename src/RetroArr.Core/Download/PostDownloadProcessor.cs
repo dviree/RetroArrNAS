@@ -248,7 +248,7 @@ namespace RetroArr.Core.Download
 
         private static readonly string[] ValidExtensions = {
             // Nintendo
-            ".nsp", ".nsz", ".xci", ".xcz", ".cia", ".3ds", ".nds", ".gba", ".gbc", ".gb", ".nes", ".sfc", ".smc", ".n64", ".z64", ".v64", ".gcm", ".wbfs", ".wad",
+            ".nsp", ".nsz", ".xci", ".xcz", ".nup", ".cia", ".3ds", ".nds", ".gba", ".gbc", ".gb", ".nes", ".sfc", ".smc", ".n64", ".z64", ".v64", ".gcm", ".wbfs", ".wad",
             // PlayStation
             ".pkg", ".iso", ".bin", ".cue", ".chd", ".pbp", ".cso",
             // PC / Windows

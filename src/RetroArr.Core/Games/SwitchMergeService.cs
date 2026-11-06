@@ -140,6 +140,13 @@ namespace RetroArr.Core.Games
         /// </summary>
         internal static readonly Regex Switch2Name = new(@"(?<![A-Za-z0-9])(NSW2|Switch[\s._-]*2)(?![0-9.])(?![\s._-]*(compatible|update))", RegexOptions.IgnoreCase);
 
+        // A Switch 2 title ID: 16 hex digits starting 04 ("[0400486024DEC000]"); Switch games start 01
+        private static readonly Regex Switch2TitleId = new(@"(?<![0-9A-Fa-f])04[0-9A-Fa-f]{14}(?![0-9A-Fa-f])");
+
+        /// <summary>A Switch 2 game file: a .nup, a Switch 2 title ID, or NSW2 / Switch 2 in its name.</summary>
+        internal static bool IsSwitch2(string name) =>
+            Path.GetExtension(name).Equals(".nup", StringComparison.OrdinalIgnoreCase) || Switch2TitleId.IsMatch(name) || Switch2Name.IsMatch(name);
+
         /// <summary>roms/switch2, beside roms/switch.</summary>
         public string? Switch2Folder
         {
@@ -164,8 +171,9 @@ namespace RetroArr.Core.Games
             try
             {
                 files = Directory.EnumerateFiles(library, "*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true })
-                    .Where(f => Mergeable.Contains(Path.GetExtension(f)) && !Path.GetFileName(f).StartsWith('.')
-                        && (Switch2Name.IsMatch(Path.GetFileName(f)) || Switch2Name.IsMatch(Path.GetRelativePath(library, Path.GetDirectoryName(f)!))))
+                    .Where(f => (Mergeable.Contains(Path.GetExtension(f)) || Path.GetExtension(f).Equals(".nup", StringComparison.OrdinalIgnoreCase))
+                        && !Path.GetFileName(f).StartsWith('.')
+                        && (IsSwitch2(Path.GetFileName(f)) || Switch2Name.IsMatch(Path.GetRelativePath(library, Path.GetDirectoryName(f)!))))
                     .ToList();
             }
             catch (Exception) { return; }
@@ -310,7 +318,8 @@ namespace RetroArr.Core.Games
             foreach (var file in Directory.EnumerateFiles(library, "*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true }))
             {
                 var name = Path.GetFileName(file);
-                if (name.StartsWith('.') || !Mergeable.Contains(Path.GetExtension(file))) continue;
+                // A Switch 2 game is never a part of a Switch game
+                if (name.StartsWith('.') || !Mergeable.Contains(Path.GetExtension(file)) || IsSwitch2(name)) continue;
                 if (Path.GetRelativePath(library, file).Split(Path.DirectorySeparatorChar).Any(d => d.StartsWith('.'))) continue;
                 var id = TitleIdRegex.Match(name);
                 // A name without its title ID ("INAZUMA ELEVEN DLC.nsp"): the ticket inside the NSP is named after it

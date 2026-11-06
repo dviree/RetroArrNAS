@@ -667,6 +667,27 @@ namespace RetroArr.Core.Test.Download
         }
 
         // Compressed Switch dumps are game files, a download of nothing else is imported
+        [Test]
+        public async Task ASwitch2Nup_IsImportedIntoRomsSwitch2()
+        {
+            var config = new ConfigurationService(_root);
+            config.SaveMediaSettings(new MediaSettings { FolderPath = Library, DestinationPath = Library });
+            config.SavePostDownloadSettings(new PostDownloadSettings { EnableAutoMove = true, EnableAutoExtract = false, EnableDeepClean = false });
+            _db = new DbContextOptionsBuilder<RetroArrDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+            var processor = new PostDownloadProcessor(config, new FileMoverService(),
+                new SqliteGameRepository(new DbFactory(_db)), new NoMetadata(), new ArchiveService(), new TitleCleanerService());
+            const string file = "The Legend of Zelda Ocarina of Time [0400486024DEC000] [v131072].nup";
+            var release = MakeRelease("Zelda OoT", (file, Encoding.ASCII.GetBytes("dump")));
+
+            var result = await processor.ProcessCompletedDownloadAsync(new DownloadStatus
+            {
+                Id = "z", Name = "Zelda OoT", PlatformFolder = "switch2", DownloadPath = release, State = DownloadState.Completed
+            });
+
+            Assert.That(result.Success, Is.True, result.Reason);
+            Assert.That(Directory.GetFiles(Path.Combine(Library, "switch2"), "*.nup", SearchOption.AllDirectories), Has.Length.EqualTo(1));
+        }
+
         [TestCase("Super Mario Odyssey.nsz")]
         [TestCase("Super Mario Odyssey.xcz")]
         public async Task GenericImport_TakesCompressedSwitchDumps(string file)
