@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v trail >/dev/null 2>&1 || npm install -g @trailhq/trail-code@0.28.0 >/dev/null 2>&1; exit 0",
+            "command": "command -v trail >/dev/null 2>&1 || npm install -g @trailhq/trail-code@0.28.1 >/dev/null 2>&1; exit 0",
             "timeout": 240
           }
         ]
