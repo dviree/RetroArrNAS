@@ -432,6 +432,11 @@ namespace RetroArr.Core.Download
             var tags = fileList.Select(f => ExtensionTags.TryGetValue(f.Extension, out var tag) ? tag : null)
                 .Where(t => t != null).Distinct().ToList();
             tags.AddRange(TitleIdTags.Where(t => t.Pattern.IsMatch(name)).Select(t => t.Tag));
+            // A Switch 2 game named so in its files, not its folder ("Mario Kart World/Mario Kart World [NSW2].xci")
+            if (fileList.Any(f => (f.Extension.Equals(".nsp", StringComparison.OrdinalIgnoreCase) || f.Extension.Equals(".xci", StringComparison.OrdinalIgnoreCase)
+                                   || f.Extension.Equals(".nsz", StringComparison.OrdinalIgnoreCase) || f.Extension.Equals(".xcz", StringComparison.OrdinalIgnoreCase))
+                                  && Games.SwitchMergeService.Switch2Name.IsMatch(f.Name)))
+                tags.Add("NSW2");
             // A Windows program and no console files: a PC game (setup.exe, Game.exe, a SteamRIP folder)
             if (tags.Count == 0 && fileList.Any(f => f.Extension.Equals(".exe", StringComparison.OrdinalIgnoreCase))) tags.Add("PC");
             var probe = new SearchResult { Title = $"{name} {string.Join(' ', tags)}" };

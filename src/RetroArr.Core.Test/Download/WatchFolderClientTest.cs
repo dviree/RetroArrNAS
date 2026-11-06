@@ -104,6 +104,16 @@ namespace RetroArr.Core.Test.Download
             Assert.That(downloads.Single(d => d.Name == "Advance Wars.gba").PlatformFolder, Is.EqualTo("gba"));
         }
 
+        [TestCase("Mario Kart World/Mario Kart World [NSW2].xci", "switch2")]
+        [TestCase("Donkey Kong Bananza (Nintendo Switch 2)/game.nsp", "switch2")]
+        [TestCase("Zelda/Zelda (Switch 2 compatible).nsp", "switch")]
+        [TestCase("Terraria/Terraria Switch 2.0 Update.nsp", "switch")]
+        public async Task Switch2Games_AreKnownByTheirNameOrTheirFilesNames(string file, string platform)
+        {
+            Write(file);
+            Assert.That((await List()).Single().PlatformFolder, Is.EqualTo(platform));
+        }
+
         [Test]
         public async Task ExtensionAlone_NamesThePlatform()
         {

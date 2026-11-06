@@ -327,6 +327,24 @@ namespace RetroArr.Core.Test.Games
             Assert.That(_calls.Count(c => c.Contains("-v")), Is.EqualTo(1), "the parts need no check of their own");
         }
 
+        [Test]
+        public void Switch2Games_GoToRomsSwitch2_WhichIsMade_Switch1GamesStay()
+        {
+            SwitchMergeService.PartSettle = TimeSpan.Zero;
+            var mk = Part("Mario Kart World [NSW2].xci", 100);
+            var dk = Part("Donkey Kong Bananza (Nintendo Switch 2)/game.nsp", 50);
+            var zelda = Part("Zelda (Switch 2 compatible) [0100F2C0115B6000][v0].nsp", 30);
+            var switch2 = Path.Combine(Path.GetDirectoryName(_switch)!, "switch2");
+
+            _service.MoveSwitch2Games(_switch);
+
+            Assert.That(Directory.Exists(switch2), Is.True, "roms/switch2 is made");
+            Assert.That(Directory.EnumerateFiles(switch2).Select(Path.GetFileName), Is.EquivalentTo(new[] { "Mario Kart World [NSW2].xci", "game.nsp" }));
+            Assert.That(File.Exists(zelda), Is.True, "a Switch game that also runs on a Switch 2 stays");
+            Assert.That(File.Exists(mk) || File.Exists(dk), Is.False);
+            Assert.That(Directory.Exists(Path.GetDirectoryName(dk)), Is.False, "the emptied folder goes");
+        }
+
         [TestCase("Tomodachi Life Living the Dream.nsp", 0x0100A6301214E000UL, 0, "Tomodachi Life Living the Dream [0100A6301214E000][v0].nsp")]
         [TestCase("INAZUMA_ELEVEN_Victory_Road_Switch_NSP_Base_Game.nsp", 0x0100B36008F90000UL, 0, "INAZUMA ELEVEN Victory Road [0100B36008F90000][v0].nsp")]
         [TestCase("Zelda [0100F2C0115B6000][v0].nsp", 0x0100F2C0115B6000UL, 0, "Zelda [0100F2C0115B6000][v0].nsp")]

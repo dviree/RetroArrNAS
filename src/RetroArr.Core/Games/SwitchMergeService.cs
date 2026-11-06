@@ -134,6 +134,64 @@ namespace RetroArr.Core.Games
             }
         }
 
+        /// <summary>
+        /// A Switch 2 game by its name or its folder's: "NSW2" or "Switch 2", but not "Switch 2 compatible" (a Switch
+        /// game that also runs on a Switch 2) and not "Switch 2.0 Update".
+        /// </summary>
+        internal static readonly Regex Switch2Name = new(@"(?<![A-Za-z0-9])(NSW2|Switch[\s._-]*2)(?![0-9.])(?![\s._-]*(compatible|update))", RegexOptions.IgnoreCase);
+
+        /// <summary>roms/switch2, beside roms/switch.</summary>
+        public string? Switch2Folder
+        {
+            get
+            {
+                var library = LibraryFolder;
+                if (library == null) return null;
+                var media = _config.LoadMediaSettings();
+                var platform = PlatformDefinitions.AllPlatforms.FirstOrDefault(p => p.MatchesFolderName("switch2"));
+                return Path.Combine(Path.GetDirectoryName(library)!, platform?.GetEffectiveFolderName(media.FolderNamingMode) ?? "switch2");
+            }
+        }
+
+        // A Switch 2 game in roms/switch goes to roms/switch2 under its own name: it is never merged as a Switch game.
+        // Never over another file; a same-size copy goes to the trash.
+        internal void MoveSwitch2Games(string library)
+        {
+            var target = Switch2Folder;
+            if (target == null) return;
+            Directory.CreateDirectory(target);
+            List<string> files;
+            try
+            {
+                files = Directory.EnumerateFiles(library, "*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true })
+                    .Where(f => Mergeable.Contains(Path.GetExtension(f)) && !Path.GetFileName(f).StartsWith('.')
+                        && (Switch2Name.IsMatch(Path.GetFileName(f)) || Switch2Name.IsMatch(Path.GetRelativePath(library, Path.GetDirectoryName(f)!))))
+                    .ToList();
+            }
+            catch (Exception) { return; }
+            var moved = new List<string>();
+            foreach (var file in files.Where(f => DateTime.UtcNow - File.GetLastWriteTimeUtc(f) >= PartSettle))
+            {
+                var to = Path.Combine(target, Path.GetFileName(file));
+                if (File.Exists(to))
+                {
+                    if (new FileInfo(to).Length == new FileInfo(file).Length) Duplicates.Add(file);
+                    else _logger.Warn($"[SwitchMerge] {to} is there already; {file} stays where it is");
+                    continue;
+                }
+                try
+                {
+                    MoveFile(file, to);
+                    moved.Add(Path.GetDirectoryName(file)!);
+                    _ = PointLibraryAtAsync(new[] { file }, to);
+                    Note($"switch 2 {file} -> {to}");
+                    _logger.Info($"[SwitchMerge] {Path.GetFileName(file)} is a Switch 2 game -> {target}");
+                }
+                catch (Exception ex) { _logger.Warn($"[SwitchMerge] Could not move {file}: {ex.Message}"); }
+            }
+            RemoveEmptyFolders(moved.Where(d => d.StartsWith(library + Path.DirectorySeparatorChar, StringComparison.Ordinal)), library);
+        }
+
         public string? LibraryFolder
         {
             get
@@ -152,6 +210,8 @@ namespace RetroArr.Core.Games
         {
             var library = LibraryFolder;
             if (library == null || !Directory.Exists(library)) return 0;
+            // roms/switch2 is there, and Switch 2 games are in it, before anything is merged
+            MoveSwitch2Games(library);
             await EnsureRustAsync(ct);
             if (!UsesRust && !File.Exists(Nscb)) return 0;
             var state = LoadState();
