@@ -462,7 +462,8 @@ namespace RetroArr.Core.Download
                 if (kind == package.Format && kind != PlayStationFormat.Lz4Folder) older.Add(existing);
             }
             // Folders one level down (roms/ps5/pkg, roms/ps5/_extracted) are only looked at, never changed
-            var elsewhere = InOtherLibraries(package, platformPath)
+            // The separate zstd library is intentionally filled even when another format is present.
+            var elsewhere = (zstd ? Enumerable.Empty<string>() : InOtherLibraries(package, platformPath))
                 .FirstOrDefault(e => !older.Contains(e) && (KindOf(e) == PlayStationFormat.Pkg) == isPkg && !IsOlder(e, package.Version));
             if (elsewhere != null)
             {

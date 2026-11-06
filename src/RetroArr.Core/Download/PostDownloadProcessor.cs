@@ -338,20 +338,30 @@ namespace RetroArr.Core.Download
             }
             
             // Compute game folder using DestinationPathPattern (respects UseDestinationPattern)
-            var gameFolder = mediaSettings.ResolveDestinationPath(libraryRoot, platformFolder ?? "unknown", containerName);
+            var flatSwitch2 = string.Equals(platformFolder, "switch2", StringComparison.OrdinalIgnoreCase);
+            var gameFolder = flatSwitch2 ? Path.Combine(libraryRoot, "switch2")
+                : mediaSettings.ResolveDestinationPath(libraryRoot, platformFolder ?? "unknown", containerName);
+            if (flatSwitch2) shouldNest = false;
             if (isDirectory && OverlapsLibrary(download.DownloadPath!, gameFolder, mediaSettings))
             {
                 _logger.Warn($"[PostDownload] Download folder {download.DownloadPath} contains the library or the game folder, not importing from it");
                 return PostDownloadResult.Fail($"Download folder overlaps the library: {download.DownloadPath}");
             }
             // Without {Title} in the pattern the folder is shared, and only a release folder in it is the game's own
-            var ownFolder = TitledPattern(mediaSettings);
+            var ownFolder = !flatSwitch2 && TitledPattern(mediaSettings);
             _logger.Info($"[PostDownload] Resolved game folder: {gameFolder}");
             Directory.CreateDirectory(gameFolder);
 
             if (isDirectory)
             {
                 var files = GetImportFiles(download.DownloadPath!, keep);
+                if (flatSwitch2)
+                {
+                    var clash = files.GroupBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase).FirstOrDefault(g => g.Count() > 1);
+                    if (clash != null) return PostDownloadResult.Fail($"Multiple source files would have the same flat destination: {clash.Key}");
+                    var taken = files.FirstOrDefault(f => CheckTarget(Path.Combine(gameFolder, Path.GetFileName(f)), f) == ImportTarget.Taken);
+                    if (taken != null) return PostDownloadResult.Fail($"Target exists, not overwriting: {Path.GetFileName(taken)}");
+                }
                 bool hasGameFile = files.Any(IsGameFile);
 
                 if (!hasGameFile)
@@ -373,7 +383,7 @@ namespace RetroArr.Core.Download
 
                 foreach (var file in files)
                 {
-                    var relativePath = Path.GetRelativePath(download.DownloadPath!, file);
+                    var relativePath = flatSwitch2 ? Path.GetFileName(file) : Path.GetRelativePath(download.DownloadPath!, file);
                     string destPath;
                     
                     // A PC game lies right in its title folder (pc/Sackboy - A Big Adventure/Sackboy/...), never in a
@@ -557,7 +567,13 @@ namespace RetroArr.Core.Download
             var roots = MediaScannerService.LibraryRoots(mediaSettings);
             string targetFolder;
             var shared = false;
-            if (!string.IsNullOrEmpty(game.Path) && Directory.Exists(game.Path) && !IsLibraryFolder(game.Path, roots))
+            var flatSwitch2 = string.Equals(effectivePlatformFolder, "switch2", StringComparison.OrdinalIgnoreCase);
+            if (flatSwitch2)
+            {
+                targetFolder = Path.Combine(libraryRoot, "switch2");
+                shared = true;
+            }
+            else if (!string.IsNullOrEmpty(game.Path) && Directory.Exists(game.Path) && !IsLibraryFolder(game.Path, roots))
             {
                 targetFolder = game.Path;
             }
@@ -592,7 +608,7 @@ namespace RetroArr.Core.Download
                 _logger.Info($"[PostDownload] Auto-detected patch (v{detectedVersion ?? "?"})");
             else if (contentType == DownloadContentType.DLC)
                 _logger.Info($"[PostDownload] Auto-detected DLC ({detectedDlcName ?? "?"})");
-            var importFolder = contentType switch
+            var importFolder = flatSwitch2 ? targetFolder : contentType switch
             {
                 DownloadContentType.Patch => Path.Combine(targetFolder, "Patches"),
                 DownloadContentType.DLC => Path.Combine(targetFolder, "DLC"),
@@ -1163,6 +1179,18 @@ namespace RetroArr.Core.Download
         private (List<ImportEntry> Plan, string? Error) PlanImport(string source, string[] files, string importFolder, string release,
             Game game, Platform? platform, DownloadContentType type, string? version, string? dlcName, MediaSettings settings)
         {
+            if (platform?.Type == PlatformType.Switch2)
+            {
+                var flat = files.Select(f =>
+                {
+                    var dest = Path.Combine(importFolder, Path.GetFileName(f));
+                    return new ImportEntry(f, dest, null, FileRenamer.IsExtra(f), CheckTarget(dest, f));
+                }).ToList();
+                var clash = flat.GroupBy(e => e.Dest, StringComparer.OrdinalIgnoreCase).FirstOrDefault(g => g.Count() > 1);
+                if (clash != null) return (new List<ImportEntry>(), $"Multiple source files would have the same flat destination: {clash.Key}");
+                var taken = flat.FirstOrDefault(e => e.Target == ImportTarget.Taken);
+                return taken == null ? (flat, null) : (new List<ImportEntry>(), $"Target exists, not overwriting: {taken.Dest}");
+            }
             var renaming = _fileRenamer != null && FileRenamer.Applies(platform, settings);
             IEnumerable<string> Stems(string file) => Candidates(file, release, game, platform, type, version, dlcName, settings, renaming);
 

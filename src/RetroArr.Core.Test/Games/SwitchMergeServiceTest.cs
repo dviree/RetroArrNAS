@@ -79,6 +79,23 @@ namespace RetroArr.Core.Test.Games
             Directory.Delete(_root, true);
         }
 
+        [Test]
+        public async Task Switch2TitleFolders_AreFlattened_AndLooseFilesAreNotTrashed()
+        {
+            SwitchMergeService.PartSettle = TimeSpan.Zero;
+            var switch2 = Directory.CreateDirectory(Path.Combine(Path.GetDirectoryName(_switch)!, "switch2")).FullName;
+            var nested = Directory.CreateDirectory(Path.Combine(switch2, "Zelda")).FullName;
+            File.WriteAllText(Path.Combine(nested, "Zelda.nup"), "game");
+            File.WriteAllText(Path.Combine(switch2, "Other.nsp"), "other");
+
+            await _service.RunOnceAsync();
+            await _service.RunOnceAsync();
+
+            Assert.That(Directory.GetFiles(switch2).Select(Path.GetFileName), Is.EquivalentTo(new[] { "Zelda.nup", "Other.nsp" }));
+            Assert.That(Directory.Exists(nested), Is.False);
+            Assert.That(_service.Duplicates, Is.Empty, "loose Switch 2 ROMs are not duplicates of themselves");
+        }
+
         private string Part(string relative, int bytes = 10)
         {
             var path = Path.Combine(_switch, relative);

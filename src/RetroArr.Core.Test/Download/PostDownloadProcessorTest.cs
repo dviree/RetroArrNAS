@@ -873,6 +873,41 @@ namespace RetroArr.Core.Test.Download
             });
         }
 
+        [TestCase(false, false)]
+        [TestCase(false, true)]
+        [TestCase(true, false)]
+        [TestCase(true, true)]
+        public async Task Switch2Imports_AreLooseFiles_EvenWithATitlePattern(bool targeted, bool fromFolder)
+        {
+            var root = Path.Combine(Path.GetTempPath(), "retroarr_switch2flat_" + Path.GetRandomFileName());
+            try
+            {
+                var library = SetUpLibrary(root, new MediaSettings { UseDestinationPattern = true, DestinationPathPattern = "{Platform}/{Title}" });
+                var dbOptions = new DbContextOptionsBuilder<RetroArrDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+                var repository = new SqliteGameRepository(new DbFactory(dbOptions));
+                var game = targeted ? await repository.AddAsync(new Game { Title = "Zelda", PlatformId = 47 }) : null;
+                var processor = new PostDownloadProcessor(new ConfigurationService(root), new FileMoverService(), repository,
+                    new FakeIgdb("Zelda", 0), new ArchiveService(), new TitleCleanerService());
+                var release = Directory.CreateDirectory(Path.Combine(root, "downloads", "release")).FullName;
+                var nested = Directory.CreateDirectory(Path.Combine(release, "nested")).FullName;
+                var payload = Path.Combine(nested, "Zelda [0400486024DEC000][v0].nup");
+                File.WriteAllText(payload, "rom");
+
+                var result = await processor.ProcessCompletedDownloadAsync(new DownloadStatus
+                {
+                    Id = "switch2", Name = "Zelda", GameId = game?.Id, PlatformFolder = "switch2", DownloadPath = fromFolder ? release : payload, State = DownloadState.Completed
+                });
+
+                Assert.That(result.Success, Is.True, result.Reason);
+                var platform = Path.Combine(library, "switch2");
+                Assert.That(File.Exists(Path.Combine(platform, Path.GetFileName(payload))), Is.True);
+                Assert.That(Directory.GetDirectories(platform), Is.Empty);
+                var saved = (await repository.GetAllLightAsync()).Single();
+                Assert.That(saved.Path, Is.EqualTo(Path.Combine(platform, Path.GetFileName(payload))));
+            }
+            finally { Directory.Delete(root, true); }
+        }
+
         private static string SetUpLibrary(string root, MediaSettings settings)
         {
             Directory.CreateDirectory(Path.Combine(root, "config"));

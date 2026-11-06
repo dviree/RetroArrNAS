@@ -153,8 +153,9 @@ namespace RetroArr.Core.Test.Download
             finally { PlayStationImporter.SmallPkg = 0; }
         }
 
-        [Test]
-        public async Task AZstdGame_GoesToTheZstdLibrary_NotRomsPs5()
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task AZstdGame_GoesToTheZstdLibrary_NotRomsPs5(bool alreadyUncompressed)
         {
             _importer.ZstdLibrary = Path.Combine(_root, "ps5zstd");
             var release = Directory.CreateDirectory(Path.Combine(_inbox, "[SAROS]-[PPSA07631]")).FullName;
@@ -164,13 +165,22 @@ namespace RetroArr.Core.Test.Download
             File.WriteAllText(Path.Combine(release, "eboot.bin"), "x");
             foreach (var f in new[] { "ampr_zstd-000.pak", "ampr_zstd-001.pak", "ampr_emu.index", "package.manifest" })
                 File.WriteAllText(Path.Combine(release, f), f);
+            string? original = null;
+            if (alreadyUncompressed)
+            {
+                original = Directory.CreateDirectory(Path.Combine(Ps5, "Saros [PPSA07631] [v1.2]")).FullName;
+                Directory.CreateDirectory(Path.Combine(original, "sce_sys"));
+                File.Copy(Path.Combine(release, "sce_sys", "param.json"), Path.Combine(original, "sce_sys", "param.json"));
+                File.WriteAllText(Path.Combine(original, "eboot.bin"), "original");
+            }
 
             var result = await Import(release);
 
             Assert.That(result.Success, Is.True, result.Reason);
             Assert.That(Directory.EnumerateDirectories(_importer.ZstdLibrary).Select(Path.GetFileName), Is.EqualTo(new[] { "Saros [PPSA07631] [v1.2]-zstd" }));
             Assert.That(File.Exists(Path.Combine(_importer.ZstdLibrary, "Saros [PPSA07631] [v1.2]-zstd", "ampr_zstd-001.pak")), Is.True);
-            Assert.That(Directory.Exists(Ps5) ? Directory.EnumerateFileSystemEntries(Ps5) : Array.Empty<string>(), Is.Empty, "nothing in roms/ps5");
+            Assert.That(Directory.Exists(Ps5) ? Directory.EnumerateFileSystemEntries(Ps5) : Array.Empty<string>(),
+                Is.EquivalentTo(original == null ? Array.Empty<string>() : new[] { original }), "roms/ps5 is unchanged");
         }
 
         [Test]

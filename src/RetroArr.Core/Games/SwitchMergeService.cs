@@ -173,7 +173,7 @@ namespace RetroArr.Core.Games
                 files = Directory.EnumerateFiles(library, "*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true })
                     .Where(f => (Mergeable.Contains(Path.GetExtension(f)) || Path.GetExtension(f).Equals(".nup", StringComparison.OrdinalIgnoreCase))
                         && !Path.GetFileName(f).StartsWith('.')
-                        && (IsSwitch2(Path.GetFileName(f)) || Switch2Name.IsMatch(Path.GetRelativePath(library, Path.GetDirectoryName(f)!))))
+                        && (SamePath(library, target) || IsSwitch2(Path.GetFileName(f)) || Switch2Name.IsMatch(Path.GetRelativePath(library, Path.GetDirectoryName(f)!))))
                     .ToList();
             }
             catch (Exception) { return; }
@@ -181,6 +181,7 @@ namespace RetroArr.Core.Games
             foreach (var file in files.Where(f => DateTime.UtcNow - File.GetLastWriteTimeUtc(f) >= PartSettle))
             {
                 var to = Path.Combine(target, Path.GetFileName(file));
+                if (SamePath(file, to)) continue;
                 if (File.Exists(to))
                 {
                     if (new FileInfo(to).Length == new FileInfo(file).Length) Duplicates.Add(file);
@@ -217,9 +218,12 @@ namespace RetroArr.Core.Games
         public async Task<int> RunOnceAsync(CancellationToken ct = default)
         {
             var library = LibraryFolder;
-            if (library == null || !Directory.Exists(library)) return 0;
+            if (library == null) return 0;
             // roms/switch2 is there, and Switch 2 games are in it, before anything is merged
-            MoveSwitch2Games(library);
+            if (Directory.Exists(library)) MoveSwitch2Games(library);
+            // Older imports used a title folder; publish their ROMs beside the new loose imports.
+            if (Switch2Folder is { } switch2) MoveSwitch2Games(switch2);
+            if (!Directory.Exists(library)) return 0;
             await EnsureRustAsync(ct);
             if (!UsesRust && !File.Exists(Nscb)) return 0;
             var state = LoadState();
