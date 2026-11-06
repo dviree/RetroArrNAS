@@ -33,6 +33,7 @@ This fork adds what a download-and-sort pipeline on a NAS needs, so no scripts r
 - The title ID decides the console (PPSA/ECAS → PS5, CUSA → PS4); names from `param.json`/`param.sfo`: `Title [PPSA01234] [v1.2]`
 - PS5: images (`.exfat`, `.ffpfsc`), game folders and LZ4 folders in `ps5/`; game PKGs in `ps5/pkg/`; update and DLC PKGs, with the backports, in `PS_BACKPORT_FOLDER`, outside the library. A higher version replaces a lower one in the same format; PKGs are kept beside any other format; LZ4 folders are never replaced
 - PS4: every PKG of a game (base, updates, DLC) in one folder, `ps4/<Game> [CUSA01234]/` or the folder that holds the game already
+- PS4 base + latest matching update are rebuilt into one game PKG automatically, using a pinned Linux build of [OrbisPkgTool](https://github.com/pearlxcore/OrbisPkgTool). Matching uses the package's own title ID and content ID, not its filename; DLC stays separate. The job starts after two minutes, checks every five minutes, and waits until the inputs have been untouched for ten minutes. It validates the rebuilt package and the published copy before the originals go to the trash. A failed build, changed input or occupied output name keeps the originals. Progress is logged with `[PS4Merge]`. The builder is structurally tested with synthetic packages; installation and play on a physical PS4 still need verification. Originals remain recoverable from the trash.
 - Backports (PKGs patched for older firmware) are kept apart in `PS_BACKPORT_FOLDER`, one folder per release, known by name or by their `fakelib` folder; never imported as the game
 - Folders named only by a title ID ("PPSA01234-app0-lz4") get the game's name every hour, LZ4 and zstd libraries (`PS_LIBRARY_EXTRA`) too, renamed in place keeping their `-lz4`/`-zstd` ending; every rename is logged to `ps-renames.json`
 - A PS game's file list shows its other copies (its PKG, an image)
@@ -62,6 +63,9 @@ This fork adds what a download-and-sort pipeline on a NAS needs, so no scripts r
 | `CLEANUP_DAYS` | `2` | How long a leftover must be untouched before it goes |
 | `CLEANUP_FOLDERS` | empty | More folders whose contents go the same way, separated by `;` (an old tool's work folder, a test folder); the folders themselves stay |
 | `PS4_MERGE` | `true` | Merges two roms/ps4 folders of one game into one (a same-size copy goes to the trash); `false` only logs it |
+| `PS4_PKG_MERGE` | `true` | Rebuild a matching PS4 base game and latest update into one validated game PKG; `false` disables rebuilding |
+| `PS4_PKG_TOOL` | `/opt/ps4pkg/OrbisPkgTool` | Bundled MIT-licensed merger; no proprietary publishing tools required |
+| `PS4_PKG_WORK` | `/temp/retroarr-ps4-merge` | Extraction/build workspace; starts only with at least four times the input package sizes free, and the builder checks its actual space needs too |
 | `PS_HOLD_FILE` | - | A file that pauses PS imports while it exists |
 | `SWITCH_KEYS_FILE` | `/app/config/switch/prod.keys` | Your own keys; merging is off without them |
 | `SWITCH_NSCB_RUST`, `SWITCH_NSCB_RUST_URL` | `/app/config/switch/nscb_rust`, pinned release | The merger and where it is fetched from |

@@ -247,6 +247,7 @@ namespace RetroArr.Host
             builder.Services.AddSingleton<TrashService>();
             builder.Services.AddHostedService<TrashPurgeService>();
             builder.Services.AddHostedService<SwitchMergeService>();
+            builder.Services.AddHostedService<Ps4PkgMergeService>();
             builder.Services.AddHostedService<PlayStationLibraryNamer>();
             builder.Services.AddHostedService<MissingGameRelinker>();
             builder.Services.AddHostedService<BiosSorter>();

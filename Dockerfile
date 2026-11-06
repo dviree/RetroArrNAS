@@ -109,6 +109,22 @@ RUN apk add --no-cache git && mkdir -p /nscb && \
       && sed -n 6655p /nscb/Fs/Nsp.py | grep -q 'os.remove(xmlfile)' \
     ) || echo "[nscb] WARN: download failed at build time; Switch merging stays off until the image is rebuilt"
 
+# Managed PS4 base + update rebuilder, pinned to reviewed MIT-licensed source.
+# The CLI has no Windows dependency in its merge path; target portable .NET and
+# run a real synthetic package round-trip here before including it in the image.
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS ps4pkg
+ARG ORBISPKG_COMMIT=3de6da849b64a8ad0d5ba00dd4e8919934b868b0
+ARG TARGETARCH
+RUN apt-get update && apt-get install -y --no-install-recommends git python3 && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+RUN git init -q . && git fetch -q --depth 1 https://github.com/pearlxcore/OrbisPkgTool "${ORBISPKG_COMMIT}" && git checkout -q FETCH_HEAD
+RUN --mount=type=cache,target=/root/.nuget/packages \
+    case "$TARGETARCH" in amd64) RID=linux-x64 ;; arm64) RID=linux-arm64 ;; *) exit 1 ;; esac && \
+    dotnet publish OrbisPkgTool/OrbisPkgTool.csproj -c Release -p:TargetFramework=net10.0 \
+      -r "$RID" --self-contained true -o /opt/ps4pkg && cp LICENSE /opt/ps4pkg/LICENSE
+COPY scripts/ps4-pkg-smoke.py /tmp/ps4-pkg-smoke.py
+RUN python3 /tmp/ps4-pkg-smoke.py /opt/ps4pkg/OrbisPkgTool
+
 FROM node:22 AS frontend
 WORKDIR /src
 COPY package.json package-lock.json ./
@@ -198,6 +214,7 @@ COPY --from=steamprefill /steamprefill /opt/steamprefill
 COPY --from=battlenetprefill /battlenetprefill /opt/battlenetprefill
 COPY --from=epicprefill /epicprefill /opt/epicprefill
 COPY --from=nscb /nscb /opt/nscb
+COPY --from=ps4pkg /opt/ps4pkg /opt/ps4pkg
 # SwitchMergeService writes the keys file there before a merge (NSC_Builder reads keys.txt next to itself)
 RUN chmod -R a+rwX /opt/nscb
 
