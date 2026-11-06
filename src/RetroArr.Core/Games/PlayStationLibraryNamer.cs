@@ -18,7 +18,8 @@ namespace RetroArr.Core.Games
     /// <summary>
     /// Gives PS4/PS5 games in roms/ps5 and roms/ps4 that are only a title ID ("PPSA26344-app0", "CUSA00900.pkg") a
     /// real name: "Ghost of Yotei [PPSA26344] [v1.0]". LZ4 folders and the other libraries (PS_LIBRARY_EXTRA, the LZ4
-    /// library, the zstd library) are renamed in place too, keeping their -lz4 or -zstd ending; nothing is ever moved out of them.
+    /// library, the zstd library) are renamed in place too, keeping their -lz4 or -zstd ending. Complete ZSTD games found
+    /// in ps5-lz4 are relocated to PS_ZSTD_LIBRARY once settled.
     /// The title comes from the game's own param.json/param.sfo, else from the AI. Names that already carry a title are
     /// left alone, as is anything written to in the last six hours (a converter may be at work). Every rename is logged
     /// to ps-renames.json in the config folder, so it can be undone.
@@ -35,14 +36,17 @@ namespace RetroArr.Core.Games
         internal static TimeSpan QuietFor = TimeSpan.FromHours(6);
         // internal for tests: the rename itself, so a read-only mount can be renamed through the shared one
         internal Action<string, string> Rename = Move;
+        internal string ZstdLibrary = Environment.GetEnvironmentVariable("PS_ZSTD_LIBRARY") ?? "/nas/games/ps5zstd";
+        private readonly IGameRepository? _games;
 
         private readonly TrashService? _trash;
 
-        public PlayStationLibraryNamer(ConfigurationService config, AiTitleService? ai = null, TrashService? trash = null)
+        public PlayStationLibraryNamer(ConfigurationService config, AiTitleService? ai = null, TrashService? trash = null, IGameRepository? games = null)
         {
             _config = config;
             _ai = ai;
             _trash = trash;
+            _games = games;
         }
 
         public static bool Enabled =>
@@ -78,7 +82,7 @@ namespace RetroArr.Core.Games
                     // Only PS5 has a pkg folder
                     if (p == "ps5") yield return Path.Combine(folder, PlayStationImporter.PkgFolder);
                 }
-            // The LZ4 library: names only, in place
+            // Extra libraries: ZSTD games in ps5-lz4 were relocated before naming.
             foreach (var extra in PlayStationImporter.OtherLibraries) yield return extra;
             // PS5 updates, DLC and backports, outside the library: they get the game's name too
             yield return ExtrasRoot;
@@ -100,6 +104,7 @@ namespace RetroArr.Core.Games
         {
             var done = new List<(string, string)>();
             _votes.Clear();
+            await MoveZstdLibrariesAsync(done, ct);
             SortExtras(done);
             await SortIntoGameFoldersAsync(done);
             foreach (var folder in Folders().Where(Directory.Exists))
@@ -143,6 +148,84 @@ namespace RetroArr.Core.Games
             }
             if (done.Count > 0) Remember(done);
             return done;
+        }
+
+        // Move the complete game, not just its compressed chunks. Use the shared mount
+        // when the LZ4 library is mounted read-only; never copy or overwrite a destination.
+        private async Task MoveZstdLibrariesAsync(List<(string, string)> done, CancellationToken ct)
+        {
+            foreach (var root in PlayStationImporter.OtherLibraries
+                .Where(p => string.Equals(Path.GetFileName(Path.TrimEndingDirectorySeparator(p)), "ps5-lz4", StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.Ordinal))
+            {
+                if (!Directory.Exists(root)) continue;
+                try
+                {
+                    if ((File.GetAttributes(root) & FileAttributes.ReparsePoint) != 0) continue;
+                    foreach (var game in Directory.GetDirectories(root).OrderBy(p => p, StringComparer.Ordinal))
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        if (Path.GetFileName(game).StartsWith('.')) continue;
+                        try
+                        {
+                            if (!SettledZstdGame(game)) continue;
+                            var target = Path.Combine(ZstdLibrary, Path.GetFileName(game));
+                            if (Path.GetFullPath(target) == Path.GetFullPath(game) || File.Exists(target) || Directory.Exists(target))
+                            {
+                                _logger.Info($"[PSNames] ZSTD destination already exists, keeping {game}");
+                                continue;
+                            }
+                            // Read rows before moving so a database read failure leaves the source alone.
+                            var rows = _games == null ? null : await _games.GetPathRowsAsync();
+                            var sharedSource = IO.SharedMount.Translate(game) ?? game;
+                            string? Remap(string? path) => MovedPath(MovedPath(path, game, target), sharedSource, target);
+                            Directory.CreateDirectory(ZstdLibrary);
+                            Rename(game, target);
+                            done.Add((game, target));
+                            _logger.Info($"[PSNames] Moved complete ZSTD game {game} -> {target}");
+                            if (rows != null)
+                                foreach (var row in rows.Where(r => Remap(r.Path) != r.Path || Remap(r.ExecutablePath) != r.ExecutablePath))
+                                    await _games!.UpdateFieldsAsync(row.Id, g =>
+                                    {
+                                        g.Path = Remap(g.Path)!;
+                                        g.ExecutablePath = Remap(g.ExecutablePath);
+                                    });
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        { _logger.Warn($"[PSNames] Could not relocate ZSTD game {game}: {ex.Message}"); }
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                { _logger.Warn($"[PSNames] Cannot read ZSTD candidates in {root}: {ex.Message}"); }
+            }
+        }
+
+        private static string? MovedPath(string? path, string from, string to) =>
+            path == from ? to : path != null && path.StartsWith(from + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                ? to + path.Substring(from.Length) : path;
+
+        private static bool SettledZstdGame(string root)
+        {
+            var pending = new Stack<string>();
+            pending.Push(root);
+            var zstd = false;
+            while (pending.Count > 0)
+            {
+                var dir = pending.Pop();
+                if ((File.GetAttributes(dir) & FileAttributes.ReparsePoint) != 0) return false;
+                foreach (var entry in Directory.EnumerateFileSystemEntries(dir))
+                {
+                    var attributes = File.GetAttributes(entry);
+                    if ((attributes & FileAttributes.ReparsePoint) != 0) return false;
+                    if ((attributes & FileAttributes.Directory) != 0) { pending.Push(entry); continue; }
+                    if (DateTime.UtcNow - File.GetLastWriteTimeUtc(entry) < QuietFor) return false;
+                    var name = Path.GetFileName(entry);
+                    zstd |= name.StartsWith("ampr_zstd", StringComparison.OrdinalIgnoreCase)
+                        || name.EndsWith(".zst", StringComparison.OrdinalIgnoreCase)
+                        || name.EndsWith(".zstd", StringComparison.OrdinalIgnoreCase);
+                }
+            }
+            return zstd;
         }
 
         // Loose PKGs in roms/ps4 go into their game's folder (roms/ps4/<Game> [CUSA01234]/), under the same name

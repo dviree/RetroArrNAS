@@ -31,6 +31,7 @@ namespace RetroArr.Core.Test.Games
             _ps5 = Directory.CreateDirectory(_namer.Folders().First()).FullName;
             _lz4 = Directory.CreateDirectory(Path.Combine(_root, "ps5-lz4")).FullName;
             Environment.SetEnvironmentVariable("PS_LIBRARY_EXTRA", _lz4);
+            _namer.ZstdLibrary = Path.Combine(_root, "ps5zstd");
             _quiet = PlayStationLibraryNamer.QuietFor;
             PlayStationLibraryNamer.QuietFor = TimeSpan.FromHours(6);
         }
@@ -446,6 +447,104 @@ namespace RetroArr.Core.Test.Games
             Assert.That(Directory.EnumerateDirectories(zstd).Select(Path.GetFileName), Is.EqualTo(new[] { "Ghost of Yōtei [PPSA26344] [v1.0.2]-zstd" }),
                 "renamed where it is, never moved, and still says zstd");
             Assert.That(PlayStationPackageInspector.Inspect(Path.Combine(zstd, "Ghost of Yōtei [PPSA26344] [v1.0.2]-zstd")).IsCompressed, Is.True);
+        }
+
+        [TestCase("ampr_zstd-000.pak")]
+        [TestCase("data.ZST")]
+        [TestCase("data.zstd")]
+        public async Task ZstdInLz4_MovesTheWholeGame_AndLeavesLz4Games(string marker)
+        {
+            var game = Game(_lz4, "Saros [PPSA26344] [v1.0.2]");
+            var markerPath = Path.Combine(game, marker);
+            File.WriteAllText(markerPath, "compressed");
+            File.SetLastWriteTimeUtc(markerPath, DateTime.UtcNow.AddDays(-1));
+            var lz4 = Game(_lz4, "Other Game-lz4");
+
+            var moves = await _namer.RunOnceAsync();
+
+            var target = Path.Combine(_namer.ZstdLibrary, Path.GetFileName(game));
+            Assert.That(Directory.Exists(game), Is.False);
+            Assert.That(File.ReadAllText(Path.Combine(target, marker)), Is.EqualTo("compressed"));
+            Assert.That(File.Exists(Path.Combine(target, "eboot.bin")), Is.True);
+            Assert.That(File.Exists(Path.Combine(target, "sce_sys", "param.json")), Is.True);
+            Assert.That(moves, Does.Contain((game, target)));
+            Assert.That(Directory.EnumerateDirectories(_lz4).Count(), Is.EqualTo(1));
+            Assert.That(Directory.EnumerateFiles(_lz4, "ampr_assets*", SearchOption.AllDirectories).Count(), Is.EqualTo(1));
+            Assert.That(await _namer.RunOnceAsync(), Is.Empty);
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public async Task ZstdInLz4_RecentOrOccupiedGameIsKept(bool recent)
+        {
+            var game = Game(_lz4, "Saros [PPSA26344] [v1.0.2]");
+            var marker = Path.Combine(game, "ampr_zstd-000.pak");
+            File.WriteAllText(marker, "compressed");
+            if (!recent)
+            {
+                File.SetLastWriteTimeUtc(marker, DateTime.UtcNow.AddDays(-1));
+                var occupied = Directory.CreateDirectory(Path.Combine(_namer.ZstdLibrary, Path.GetFileName(game))).FullName;
+                File.WriteAllText(Path.Combine(occupied, "existing"), "keep");
+            }
+
+            await _namer.RunOnceAsync();
+
+            Assert.That(File.ReadAllText(marker), Is.EqualTo("compressed"));
+            if (!recent) Assert.That(File.ReadAllText(Path.Combine(_namer.ZstdLibrary, Path.GetFileName(game), "existing")), Is.EqualTo("keep"));
+        }
+
+        [Test]
+        public async Task ZstdNamedFolderWithoutCompressedFiles_StaysInLz4()
+        {
+            var game = Game(_lz4, "Some Game-zstd");
+            await _namer.RunOnceAsync();
+            Assert.That(Directory.Exists(game), Is.True);
+            Assert.That(Directory.Exists(_namer.ZstdLibrary), Is.False);
+        }
+
+        [Test]
+        public async Task ZstdMove_RepointsGameAndExecutable_WithoutTouchingOtherPaths()
+        {
+            var source = Game(_lz4, "Saros [PPSA26344] [v1.0.2]");
+            var marker = Path.Combine(source, "ampr_zstd.index");
+            File.WriteAllText(marker, "index");
+            File.SetLastWriteTimeUtc(marker, DateTime.UtcNow.AddDays(-1));
+            var repo = System.Reflection.DispatchProxy.Create<IGameRepository, ZstdRepository>();
+            var state = (ZstdRepository)(object)repo;
+            state.Game = new Game { Id = 17, Path = source, ExecutablePath = Path.Combine(source, "eboot.bin") };
+            _namer.Dispose();
+            _namer = new PlayStationLibraryNamer(new ConfigurationService(_root), games: repo)
+            { ZstdLibrary = Path.Combine(_root, "ps5zstd"), ExtrasRoot = Path.Combine(_root, "extras") };
+
+            await _namer.RunOnceAsync();
+
+            var target = Path.Combine(_namer.ZstdLibrary, Path.GetFileName(source));
+            Assert.That(state.Game.Path, Is.EqualTo(target));
+            Assert.That(state.Game.ExecutablePath, Is.EqualTo(Path.Combine(target, "eboot.bin")));
+            Assert.That(state.Updates, Is.EqualTo(1));
+        }
+
+        public class ZstdRepository : System.Reflection.DispatchProxy
+        {
+            public Game Game = null!;
+            public int Updates;
+            protected override object? Invoke(System.Reflection.MethodInfo? method, object?[]? args)
+            {
+                if (method!.Name == nameof(IGameRepository.GetPathRowsAsync))
+                    return Task.FromResult(new System.Collections.Generic.List<GamePathRow>
+                    {
+                        new() { Id = Game.Id, Path = Game.Path, ExecutablePath = Game.ExecutablePath },
+                        new() { Id = 99, Path = Game.Path + "-different", ExecutablePath = "/other/eboot.bin" }
+                    });
+                if (method.Name == nameof(IGameRepository.UpdateFieldsAsync))
+                {
+                    Assert.That(args![0], Is.EqualTo(Game.Id));
+                    ((Action<Game>)args[1]!)(Game);
+                    Updates++;
+                    return Task.FromResult<Game?>(Game);
+                }
+                throw new NotSupportedException(method.Name);
+            }
         }
 
         [Test]
