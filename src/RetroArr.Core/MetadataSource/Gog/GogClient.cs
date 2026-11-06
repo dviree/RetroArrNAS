@@ -17,7 +17,7 @@ namespace RetroArr.Core.MetadataSource.Gog
     {
         private static readonly NLog.Logger _logger = NLog.LogManager.GetLogger(Logging.AppLoggerService.GogDownloads);
         private readonly HttpClient _httpClient;
-        private readonly string? _refreshToken;
+        private string? _refreshToken;
         private string? _accessToken;
         private DateTime _tokenExpiration;
 
@@ -31,6 +31,9 @@ namespace RetroArr.Core.MetadataSource.Gog
             _httpClient = new HttpClient();
             _httpClient.DefaultRequestHeaders.Add("User-Agent", "RetroArr/1.0");
         }
+
+        // The one to store after RefreshTokenAsync: GOG hands out a new one with each refresh
+        public string? RefreshToken => _refreshToken;
 
         public static string GetLoginUrl(string clientId, string redirectUri)
         {
@@ -73,6 +76,7 @@ namespace RetroArr.Core.MetadataSource.Gog
             {
                 _accessToken = tokenResponse.AccessToken;
                 _tokenExpiration = DateTime.UtcNow.AddSeconds(tokenResponse.ExpiresIn - 60);
+                if (!string.IsNullOrEmpty(tokenResponse.RefreshToken)) _refreshToken = tokenResponse.RefreshToken;
                 return true;
             }
 
@@ -277,7 +281,17 @@ namespace RetroArr.Core.MetadataSource.Gog
                 return null;
             }
 
-            var fullUrl = manualUrl.StartsWith("http") ? manualUrl : $"{GogEmbedUrl}{manualUrl}";
+            // The bearer token goes with this request, so only ever to GOG over https
+            if (!Uri.TryCreate(new Uri(GogEmbedUrl.TrimEnd('/') + "/"), manualUrl, out var uri)
+                || uri.Scheme != Uri.UriSchemeHttps
+                || !(uri.Host.Equals("embed.gog.com", StringComparison.OrdinalIgnoreCase)
+                     || uri.Host.Equals("www.gog.com", StringComparison.OrdinalIgnoreCase)
+                     || uri.Host.Equals("gog.com", StringComparison.OrdinalIgnoreCase)))
+            {
+                _logger.Error($"[GOG] GetDownloadUrl: refusing non-GOG download URL {manualUrl}");
+                return null;
+            }
+            var fullUrl = uri.ToString();
             _logger.Info($"[GOG] Resolving download URL: {fullUrl}");
 
             // Use a separate handler that does NOT follow redirects so we can capture CDN URLs

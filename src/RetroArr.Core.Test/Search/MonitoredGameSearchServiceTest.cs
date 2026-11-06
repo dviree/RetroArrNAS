@@ -457,6 +457,37 @@ namespace RetroArr.Core.Test.Search
             Assert.That(jackett.Queries, Is.EqualTo(new[] { "Gears of War" }));
         }
 
+        // The sweep reaches a game hours after it started on a monitored platform: it searches the game as it is then,
+        // also one the sweep itself flagged missing at its start
+        [TestCase(false)]
+        [TestCase(true, TestName = "Sweep_GameFlaggedMissingThenRenamedWhileTheSweepRuns_IsSearchedByItsNewTitle")]
+        public async Task Sweep_GameRenamedWhileTheSweepRuns_IsSearchedByItsNewTitle(bool emptied)
+        {
+            var library = Directory.CreateDirectory(Path.Combine(_root, "library")).FullName;
+            var gears = Directory.CreateDirectory(Path.Combine(library, "xbox360", "Gears of War")).FullName;
+            using (var ctx = new RetroArrDbContext(_dbOptions))
+            {
+                ctx.Games.Add(emptied
+                    ? new Game { Id = 2, Title = "Gears of War", PlatformId = 31, Monitored = true, Status = GameStatus.Downloaded, Path = gears }
+                    : new Game { Id = 2, Title = "Gears of War", PlatformId = 31, Monitored = true });
+                ctx.SaveChanges();
+            }
+            using var jackett = new FakeServer(_ =>
+            {
+                using var ctx = new RetroArrDbContext(_dbOptions);
+                ctx.Games.Single(g => g.Id == 2).Title = "Gears of War 2";
+                ctx.SaveChanges();
+                return JackettResults();
+            });
+            var config = new ConfigurationService(_root);
+            config.SaveMediaSettings(new MediaSettings { FolderPath = library, DestinationPath = library });
+            config.SaveJackettSettings(new JackettSettings { Url = $"http://127.0.0.1:{jackett.Port}", ApiKey = "key", Enabled = true });
+
+            await Sweep(config);
+
+            Assert.That(jackett.Queries, Is.EqualTo(new[] { "Halo 3", "Gears of War 2" }));
+        }
+
         // A library with Halo 3 at <library>/xbox360/Halo 3, searched by a Jackett that finds nothing.
         private (string Game, ConfigurationService Config) Library(FakeServer jackett, GameStatus status, bool monitored = true, bool createFolder = true)
         {
@@ -667,6 +698,7 @@ namespace RetroArr.Core.Test.Search
             // Hydra sources carry no seeder count, so the kept row is a Reject.
             var hydraRow = result.Scored.Single();
             Assert.That(hydraRow.Release.Title, Is.EqualTo("Halo 3 (USA)"));
+            Assert.That(hydraRow.Release.DownloadUrl, Is.EqualTo("magnet:?xt=urn:btih:fedcba9876543210fedcba9876543210fedcba98"));
             Assert.That(hydraRow.Decision, Is.EqualTo(ReleaseDecision.Reject));
             Assert.That(hydraRow.Reason, Does.StartWith("insufficient seeders"));
         }
@@ -687,6 +719,32 @@ namespace RetroArr.Core.Test.Search
             Assert.That(result.ProviderErrors[0], Does.StartWith("hydra: "));
             Assert.That(result.ProviderErrors[0], Does.Contain("refused").IgnoreCase);
             Assert.That(result.Scored.Select(s => s.Release.Title), Is.EqualTo(new[] { "Halo 3 (USA) P2P" }));
+        }
+
+        // A source that is not the usual object (a bare array, a scalar) is empty, not an error; the source cache is keyed by URL
+        [TestCase("[]")]
+        [TestCase("\"not a source\"")]
+        public async Task HydraSource_WithoutADownloadsObject_ReturnsNothing(string body)
+        {
+            using var hydra = new FakeServer(body);
+            using var http = new System.Net.Http.HttpClient();
+            var indexer = new RetroArr.Core.Indexers.HydraIndexer(http, "hydra", $"http://127.0.0.1:{hydra.Port}/");
+
+            var results = await indexer.SearchAsync("Halo 3");
+
+            Assert.That(results, Is.Empty);
+        }
+
+        [Test]
+        public void DirectDownloadLink_IsRejected()
+        {
+            var release = new RetroArr.Core.Prowlarr.SearchResult { Title = "Halo 3 (USA)", Protocol = "http" };
+            var game = new Game { Id = 1, Title = "Halo 3", PlatformId = 31 };
+
+            var scored = new ReleaseScorer().Score(release, game, new MonitorSettings());
+
+            Assert.That(scored.Decision, Is.EqualTo(ReleaseDecision.Reject));
+            Assert.That(scored.Reason, Does.Contain("direct download"));
         }
     }
 }

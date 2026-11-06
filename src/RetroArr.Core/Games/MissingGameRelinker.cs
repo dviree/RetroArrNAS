@@ -55,7 +55,8 @@ namespace RetroArr.Core.Games
             if (roots.Count == 0) return 0;
             var relinked = 0;
             var taken = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var game in await _games.GetMissingAsync())
+            // Every game marked missing, with its paths (GetMissingAsync only checks given ids)
+            foreach (var game in (await _games.GetAllLightAsync()).Where(g => g.MissingSince != null))
             {
                 var old = game.ExecutablePath ?? game.Path;
                 if (string.IsNullOrEmpty(old) || File.Exists(old) || Directory.Exists(old)) continue;

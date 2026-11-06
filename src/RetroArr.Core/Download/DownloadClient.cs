@@ -23,6 +23,8 @@ namespace RetroArr.Core.Download
         public bool DeleteSourceAfterImport { get; set; }
         // Watch folder only: look into collection folders for the games, instead of taking each entry as one
         public bool Recursive { get; set; }
+        // Not in the UI: set in downloadclients.json for a Deluge Web UI with a self-signed certificate
+        public bool AllowSelfSignedCert { get; set; }
         public int Priority { get; set; }
         
         // Remote Path Mapping

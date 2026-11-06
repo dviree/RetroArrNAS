@@ -58,32 +58,6 @@ async function bootstrapApiKey(): Promise<string | null> {
 // Eagerly try to bootstrap so the first real request has the header ready.
 bootstrapApiKey();
 
-// Monkey-patch window.fetch so any raw fetch('/api/...') calls in the app
-// (Status.tsx, SignalR negotiate, older components) also carry the X-Api-Key
-// header and survive on LAN. Same-origin + path starts with /api/ or /hubs/.
-if (typeof window !== 'undefined' && typeof window.fetch === 'function') {
-  const nativeFetch = window.fetch.bind(window);
-  window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url =
-      typeof input === 'string'
-        ? input
-        : input instanceof URL
-          ? input.toString()
-          : input.url;
-
-    const needsKey = url.startsWith('/api/') || url.startsWith('/hubs/');
-    if (!needsKey) return nativeFetch(input, init);
-
-    let key = _apiKey;
-    if (!key) key = await bootstrapApiKey();
-    if (!key) return nativeFetch(input, init);
-
-    const headers = new Headers(init?.headers || (typeof input !== 'string' && !(input instanceof URL) ? input.headers : undefined));
-    if (!headers.has('X-Api-Key')) headers.set('X-Api-Key', key);
-    return nativeFetch(input, { ...init, headers });
-  };
-}
-
 // Attach a unique X-Request-Id header + API key to every request.
 apiClient.interceptors.request.use(async (config) => {
   const id = Math.random().toString(36).substring(2, 14);
@@ -528,6 +502,7 @@ export interface DatabaseRepairResult {
   platformsHealed: number;
   danglingGameFilesRemoved: number;
   duplicatesMerged: number;
+  containerOrphansRemoved: number;
 }
 
 export interface DatabaseResetChallenge {
@@ -616,7 +591,6 @@ export interface BulkReviewData {
 
 // -- Games --
 export const gamesApi = {
-  getAll: () => apiClient.get<Game[]>('/game'),
   getCounts: () => apiClient.get<Record<string, number>>('/game/counts'),
   getPaged: (params: { page?: number; pageSize?: number; platformId?: number; search?: string; sortOrder?: string; missingOnly?: boolean; protonDbTier?: string }) =>
     apiClient.get<PagedResult<GameListDto>>('/game/paged', { params }),
@@ -712,22 +686,23 @@ export const settingsApi = {
   getDatabase: () => apiClient.get<DatabaseConfig>('/settings/database'),
   saveDatabase: (config: DatabaseConfig) => apiClient.put('/settings/database', config),
   testDatabase: (config: DatabaseConfig) => apiClient.post('/settings/database/test', config),
-  migrateDatabase: (config: DatabaseConfig) => apiClient.post<MigrationResult>('/settings/database/migrate', config),
-  backupDatabase: () => apiClient.post('/settings/database/backup'),
+  // migrate, backup, health, repair, reset and the log export run in the request and grow with the library
+  migrateDatabase: (config: DatabaseConfig) => apiClient.post<MigrationResult>('/settings/database/migrate', config, { timeout: 600000 }),
+  backupDatabase: () => apiClient.post('/settings/database/backup', null, { timeout: 120000 }),
   getDatabaseStats: () => apiClient.get<DatabaseStats>('/settings/database/stats'),
-  checkDatabaseHealth: () => apiClient.post<DatabaseHealthReport>('/settings/database/health'),
-  repairDatabase: (opts: { healPlatformFromPath: boolean; mergeDuplicates: boolean }) => apiClient.post<DatabaseRepairResult>('/settings/database/repair', opts),
+  checkDatabaseHealth: () => apiClient.post<DatabaseHealthReport>('/settings/database/health', null, { timeout: 120000 }),
+  repairDatabase: (opts: { healPlatformFromPath: boolean; mergeDuplicates: boolean }) => apiClient.post<DatabaseRepairResult>('/settings/database/repair', opts, { timeout: 600000 }),
   resetDatabaseChallenge: (kind: 'library' | 'download-history') =>
     apiClient.post<DatabaseResetChallenge>(`/settings/database/reset/challenge?kind=${encodeURIComponent(kind)}`),
   resetDatabaseLibrary: (token: string, confirmation: string) =>
-    apiClient.post('/settings/database/reset', { token, confirmation }),
+    apiClient.post('/settings/database/reset', { token, confirmation }, { timeout: 120000 }),
   resetDatabaseDownloadHistory: (token: string, confirmation: string) =>
-    apiClient.post('/settings/database/reset-download-history', { token, confirmation }),
+    apiClient.post('/settings/database/reset-download-history', { token, confirmation }, { timeout: 120000 }),
 
   getLogging: () => apiClient.get('/settings/logging'),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   saveLogging: (settings: any) => apiClient.post('/settings/logging', settings),
-  exportLogs: (params: { timeRange: string }) => apiClient.post('/settings/logging/export', params, { responseType: 'arraybuffer' }),
+  exportLogs: (params: { timeRange: string }) => apiClient.post('/settings/logging/export', params, { responseType: 'arraybuffer', timeout: 600000 }),
 
   getCache: () => apiClient.get<CacheConfig>('/settings/cache'),
   saveCache: (config: CacheConfig) => apiClient.put('/settings/cache', config),
@@ -828,7 +803,7 @@ export const gogApi = {
   saveSettings: (settings: unknown) => apiClient.post('/gog/settings', settings),
   getAuthUrl: () => apiClient.get<{ url: string }>('/gog/auth/url'),
   submitAuthCode: (code: string) => apiClient.post('/gog/auth/code', { code }),
-  sync: () => apiClient.post('/gog/sync'),
+  sync: () => apiClient.post('/gog/sync', null, { timeout: 600000 }),
   getDownloads: (gogId: string) => apiClient.get(`/settings/gog/downloads/${gogId}`),
 };
 
@@ -902,7 +877,7 @@ export const metadataReviewApi = {
   getCandidates: (gameId: number, searchOverride?: string) =>
     apiClient.get<MatchCandidate[]>(`/metadata/review/${gameId}/candidates`, { params: { searchOverride } }),
   confirm: (gameId: number, igdbId: number, score?: number, source?: string, screenScraperData?: Record<string, unknown>) =>
-    apiClient.post(`/metadata/review/${gameId}/confirm`, { igdbId, score, source: source || 'IGDB', screenScraperData }),
+    apiClient.post(`/metadata/review/${gameId}/confirm`, { igdbId, score, source: source || 'IGDB', screenScraperData }, { timeout: 600000 }),
   skip: (gameId: number) =>
     apiClient.post(`/metadata/review/${gameId}/skip`),
   dismiss: (gameId: number) =>

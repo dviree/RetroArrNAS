@@ -17,15 +17,6 @@ namespace RetroArr.Core.Games
             _contextFactory = contextFactory;
         }
 
-        public async Task<List<Game>> GetAllAsync()
-        {
-            using var context = await _contextFactory.CreateDbContextAsync();
-            return await context.Games
-                .AsNoTracking()
-                .Include(g => g.GameFiles)
-                .ToListAsync();
-        }
-
         // Untracked: the context is gone on return, and tracking a big library costs seconds
         public async Task<List<Game>> GetAllLightAsync()
         {
@@ -43,10 +34,109 @@ namespace RetroArr.Core.Games
                     Title = g.Title,
                     Path = g.Path,
                     PlatformId = g.PlatformId,
+                    Region = g.Region,
                     MissingSince = g.MissingSince,
                     ProblemResolvedAt = g.ProblemResolvedAt,
                     NoMetadata = g.IgdbId == null && (g.Overview == null || g.Overview.Length == 0)
                 })
+                .ToListAsync();
+        }
+
+        public async Task<List<GamePathRow>> GetPathRowsAsync()
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+            return await context.Games.AsNoTracking()
+                .Select(g => new GamePathRow { Id = g.Id, Path = g.Path, ExecutablePath = g.ExecutablePath })
+                .ToListAsync();
+        }
+
+        public async Task<Dictionary<int, int>> CountByPlatformAsync()
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+            return await context.Games
+                .GroupBy(g => g.PlatformId)
+                .Select(grp => new { PlatformId = grp.Key, Count = grp.Count() })
+                .ToDictionaryAsync(x => x.PlatformId, x => x.Count);
+        }
+
+        public async Task<List<GameListDto>> GetSteamRowsAsync()
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+            return await context.Games.AsNoTracking()
+                .Where(g => g.SteamId > 0 || g.PlatformId == PlatformDefinitions.SteamPlatformId || g.PlatformId == PlatformDefinitions.PcPlatformId)
+                .OrderBy(g => g.Id)
+                .Select(g => new GameListDto
+                {
+                    Id = g.Id,
+                    Title = g.Title,
+                    PlatformId = g.PlatformId,
+                    SteamId = g.SteamId,
+                    ProtonDbTier = g.ProtonDbTier
+                })
+                .ToListAsync();
+        }
+
+        public async Task<List<GameReviewRow>> GetReviewRowsAsync()
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+            return await context.Games.AsNoTracking()
+                .Where(g => g.NeedsMetadataReview && !g.MetadataConfirmedByUser)
+                .Select(g => new GameReviewRow
+                {
+                    Id = g.Id,
+                    Title = g.Title,
+                    AlternativeTitle = g.AlternativeTitle,
+                    Path = g.Path,
+                    PlatformId = g.PlatformId,
+                    MatchConfidence = g.MatchConfidence,
+                    MetadataReviewReason = g.MetadataReviewReason,
+                    IgdbId = g.IgdbId,
+                    CoverUrl = g.Images.CoverUrl,
+                    Added = g.Added
+                })
+                .ToListAsync();
+        }
+
+        public async Task<List<GameMetadataRow>> GetMetadataRowsAsync(int? platformId)
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+            IQueryable<Game> query = context.Games.AsNoTracking();
+            if (platformId.HasValue) query = query.Where(g => g.PlatformId == platformId.Value);
+            return await query
+                .OrderBy(g => g.Id)
+                .Select(g => new GameMetadataRow
+                {
+                    Id = g.Id,
+                    Title = g.Title,
+                    PlatformId = g.PlatformId,
+                    Incomplete = g.IgdbId == null || g.Overview == null || g.Overview.Length == 0,
+                    MetadataSource = g.MetadataSource,
+                    MetadataConfirmedByUser = g.MetadataConfirmedByUser
+                })
+                .ToListAsync();
+        }
+
+        public async Task<List<GameListDto>> FindByTitleAsync(int platformId, string title)
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+            // SQLite's lower() folds ASCII letters only (Ōkami, Élite): the database narrows by length, the title is compared here.
+            // length() counts code points, as case folding keeps them.
+            var length = title.EnumerateRunes().Count();
+            var rows = await context.Games.AsNoTracking()
+                .Where(g => g.PlatformId == platformId && g.Title.Length == length)
+                .OrderBy(g => g.Title).ThenBy(g => g.Id)
+                .Select(g => new GameListDto { Id = g.Id, Title = g.Title, PlatformId = g.PlatformId, Region = g.Region, Path = g.Path })
+                .ToListAsync();
+            return rows.Where(g => g.Title.Equals(title, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+
+        public async Task<List<GameListDto>> FindByIgdbIdAsync(int platformId, int igdbId)
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+            return await context.Games.AsNoTracking()
+                .Where(g => g.PlatformId == platformId && g.IgdbId == igdbId)
+                .OrderBy(g => g.Id)
+                .Select(g => new GameListDto { Id = g.Id, Title = g.Title, PlatformId = g.PlatformId, Region = g.Region, Path = g.Path, IgdbId = g.IgdbId })
                 .ToListAsync();
         }
 
@@ -61,8 +151,10 @@ namespace RetroArr.Core.Games
 
             if (!string.IsNullOrWhiteSpace(search))
             {
-                var term = search.Trim().ToLower();
-                query = query.Where(g => g.Title.ToLower().Contains(term));
+                // The title as typed too: SQLite's lower() leaves non-ASCII capitals ("Ökoland") as they are
+                var typed = search.Trim();
+                var term = typed.ToLower();
+                query = query.Where(g => g.Title.ToLower().Contains(term) || g.Title.Contains(typed));
             }
 
             if (missingOnly == true)
@@ -277,31 +369,28 @@ namespace RetroArr.Core.Games
             return found;
         }
 
+        // Only the store platform: older syncs also linked same-named games on other platforms by title
         public async Task<int> DeleteSteamGamesAsync()
         {
             using var context = await _contextFactory.CreateDbContextAsync();
-            var steamGames = await context.Games.Where(g => g.SteamId.HasValue && g.SteamId > 0).ToListAsync();
-            context.Games.RemoveRange(steamGames);
-            await context.SaveChangesAsync();
-            return steamGames.Count;
+            return await context.Games
+                .Where(g => g.SteamId > 0 && g.PlatformId == PlatformDefinitions.SteamPlatformId)
+                .ExecuteDeleteAsync();
         }
 
         public async Task<int> DeleteGogGamesAsync()
         {
             using var context = await _contextFactory.CreateDbContextAsync();
-            var gogGames = await context.Games.Where(g => !string.IsNullOrEmpty(g.GogId)).ToListAsync();
-            context.Games.RemoveRange(gogGames);
-            await context.SaveChangesAsync();
-            return gogGames.Count;
+            return await context.Games
+                .Where(g => !string.IsNullOrEmpty(g.GogId) && g.PlatformId == PlatformDefinitions.GogPlatformId)
+                .ExecuteDeleteAsync();
         }
 
         public async Task DeleteAllAsync()
         {
             using var context = await _contextFactory.CreateDbContextAsync();
-            // RemoveRange for EF Core compatibility:
-            var allGames = await context.Games.ToListAsync();
-            context.Games.RemoveRange(allGames);
-            await context.SaveChangesAsync();
+            // One statement instead of a tracked load and a DELETE per row; the database cascades to what hangs on the games
+            await context.Games.ExecuteDeleteAsync();
         }
 
         internal static void EnsureKnownPlatform(int platformId)
@@ -341,6 +430,17 @@ namespace RetroArr.Core.Games
             return new HashSet<int>(ids);
         }
 
+        public async Task<List<GameListDto>> GetListItemsAsync(IReadOnlyCollection<int> gameIds)
+        {
+            if (gameIds.Count == 0) return new List<GameListDto>();
+            var ids = gameIds.Distinct().ToList();
+            using var context = await _contextFactory.CreateDbContextAsync();
+            return await context.Games.AsNoTracking()
+                .Where(g => ids.Contains(g.Id))
+                .Select(g => new GameListDto { Id = g.Id, Title = g.Title, PlatformId = g.PlatformId })
+                .ToListAsync();
+        }
+
         public async Task<List<GameFile>> GetGameFilesAsync(int gameId)
         {
             using var context = await _contextFactory.CreateDbContextAsync();
@@ -370,12 +470,14 @@ namespace RetroArr.Core.Games
             return (changed, g.Status, g.MissingSince);
         }
 
-        public async Task<List<Game>> GetMissingAsync()
+        public async Task<List<Game>> GetMissingAsync(IReadOnlyCollection<int> gameIds)
         {
+            if (gameIds.Count == 0) return new List<Game>();
+            var ids = gameIds.Distinct().ToList();
             using var context = await _contextFactory.CreateDbContextAsync();
-            return await context.Games
-                .AsNoTracking()
-                .Where(g => g.MissingSince != null)
+            return await context.Games.AsNoTracking()
+                .Where(g => ids.Contains(g.Id) && g.MissingSince != null)
+                .Select(g => new Game { Id = g.Id, Status = g.Status, Monitored = g.Monitored, MissingSince = g.MissingSince })
                 .ToListAsync();
         }
 
@@ -407,7 +509,9 @@ namespace RetroArr.Core.Games
                 .Where(f => f.GameId == gameId)
                 .ToListAsync();
 
-            var existingPaths = new HashSet<string>(existing.Select(f => f.RelativePath));
+            // The first row of each path, looked up instead of searched for every file (a PC game has thousands)
+            var byPath = new Dictionary<string, GameFile>();
+            foreach (var f in existing) byPath.TryAdd(f.RelativePath, f);
             var newPaths = new HashSet<string>(files.Select(f => f.RelativePath));
 
             // Remove files no longer on disk
@@ -418,14 +522,13 @@ namespace RetroArr.Core.Games
             // Add new files or update existing ones
             foreach (var file in files)
             {
-                if (!existingPaths.Contains(file.RelativePath))
+                if (!byPath.TryGetValue(file.RelativePath, out var existingFile))
                 {
                     file.GameId = gameId;
                     context.GameFiles.Add(file);
                 }
                 else
                 {
-                    var existingFile = existing.First(f => f.RelativePath == file.RelativePath);
                     if (existingFile.Size != file.Size || existingFile.FileType != file.FileType)
                     {
                         existingFile.Size = file.Size;

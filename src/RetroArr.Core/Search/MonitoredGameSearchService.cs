@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
+using RetroArr.Core.Cache;
 using RetroArr.Core.Configuration;
 using RetroArr.Core.Data;
 using RetroArr.Core.Download;
@@ -50,28 +51,34 @@ namespace RetroArr.Core.Search
         private readonly ReleaseScorer _scorer;
         private readonly DownloadPlatformTracker _platformTracker;
         private readonly DownloadBlacklistRepository? _blacklist;
+        private readonly IGameRepository? _games;
 
         public MonitoredGameSearchService(
             RetroArrDbContext db,
             ConfigurationService config,
             ReleaseScorer scorer,
             DownloadPlatformTracker platformTracker,
-            DownloadBlacklistRepository? blacklist = null)
+            DownloadBlacklistRepository? blacklist = null,
+            IGameRepository? games = null)
         {
             _db = db;
             _config = config;
             _scorer = scorer;
             _platformTracker = platformTracker;
             _blacklist = blacklist;
+            _games = games;
         }
 
         public Task<MonitorSearchResult> SearchAndMaybeDispatchAsync(
             int gameId, bool allowAutoDispatch, CancellationToken ct = default) =>
             SearchAsync(gameId, allowAutoDispatch, sweep: false, ct);
 
-        private async Task<MonitorSearchResult> SearchAsync(int gameId, bool allowAutoDispatch, bool sweep, CancellationToken ct)
+        // A sweep loads the blacklist once and passes it in as sweepBlacklist
+        private async Task<MonitorSearchResult> SearchAsync(int gameId, bool allowAutoDispatch, bool sweep, CancellationToken ct,
+            Func<SearchResult, string?>? sweepBlacklist = null)
         {
-            var game = await _db.Games
+            // Untracked: in a sweep the context already holds the rows ApplyContentAsync flagged, as they were at its start
+            var game = await _db.Games.AsNoTracking()
                 .Include(g => g.Platform)
                 .FirstOrDefaultAsync(g => g.Id == gameId, ct)
                 .ConfigureAwait(false);
@@ -85,7 +92,7 @@ namespace RetroArr.Core.Search
             var result = new MonitorSearchResult { GameId = gameId, GameTitle = game.Title };
 
             // Build the query: game title plus platform tag helps narrow the hit-rate.
-            var query = BuildQuery(game);
+            var query = BuildQuery(game.Title);
             if (string.IsNullOrWhiteSpace(query))
             {
                 result.Error = "could not build search query";
@@ -118,7 +125,7 @@ namespace RetroArr.Core.Search
                 .ToList();
 
             // Score. Rejects stay in the list (last) so the UI can show why.
-            var blockedReason = await LoadBlacklistAsync().ConfigureAwait(false);
+            var blockedReason = sweep ? sweepBlacklist : await LoadBlacklistAsync().ConfigureAwait(false);
             var scored = unique
                 .Select(r => _scorer.Score(r, game, settings, blockedReason))
                 .ToList();
@@ -189,14 +196,16 @@ namespace RetroArr.Core.Search
                 _logger.Warn($"[Monitor] library content check failed, searching with the stored status: {ex.Message}");
             }
 
+            // Id and title only: SearchAsync reads each game again when its turn comes, hours later on a big monitored list
             var monitored = await _db.Games
                 .Where(g => g.Monitored && !g.IsExternal && g.Status != GameStatus.Downloaded && g.Status != GameStatus.InstallerDetected)
-                .Include(g => g.Platform)
                 .OrderBy(g => g.Id)
+                .Select(g => new { g.Id, g.Title })
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
 
             _logger.Info($"[Monitor] sweep starting: {monitored.Count} monitored game(s).");
+            var blacklist = await LoadBlacklistAsync().ConfigureAwait(false);
 
             foreach (var g in monitored)
             {
@@ -208,7 +217,7 @@ namespace RetroArr.Core.Search
                 }
                 try
                 {
-                    await SearchAsync(g.Id, allowAutoDispatch: true, sweep: true, ct).ConfigureAwait(false);
+                    await SearchAsync(g.Id, allowAutoDispatch: true, sweep: true, ct, blacklist).ConfigureAwait(false);
                     // Polite stagger between games to be kind to indexers.
                     await Task.Delay(TimeSpan.FromSeconds(2), ct).ConfigureAwait(false);
                 }
@@ -226,8 +235,10 @@ namespace RetroArr.Core.Search
         internal async Task<HashSet<int>> CheckLibraryContentAsync(CancellationToken ct)
         {
             var roots = MediaScannerService.LibraryRoots(_config.LoadMediaSettings());
+            // Only the columns CheckAll and ApplyContentAsync read: every game is loaded on each sweep
             var games = await _db.Games.AsNoTracking()
                 .Where(g => !g.IsExternal && g.Path != null && g.Path != "")
+                .Select(g => new Game { Id = g.Id, Path = g.Path, ExecutablePath = g.ExecutablePath, PlatformId = g.PlatformId, Status = g.Status, MissingSince = g.MissingSince })
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
             var held = new List<string>();
@@ -261,6 +272,8 @@ namespace RetroArr.Core.Search
                 var current = content == GameContent.Present ? content : MediaScannerService.CheckContent(row, roots);
                 if (current == GameContent.Unknown || !row.ApplyContent(current, now)) continue;
                 await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+                // Written past the repository: the cached game list and detail would still show the old status
+                if (_games is CachedGameRepository cached) await cached.InvalidateAsync(row.Id).ConfigureAwait(false);
                 if (row.Status == GameStatus.Missing) flagged.Add(row.Id);
             }
             return flagged;
@@ -268,10 +281,11 @@ namespace RetroArr.Core.Search
 
         // ---- Internals ----
 
-        private static string BuildQuery(Game game)
+        // Hydra matches its titles against the query with the same stripping
+        internal static string BuildQuery(string? title)
         {
             // Strip punctuation that breaks Newznab queries, like SearchController does.
-            var raw = game.Title ?? string.Empty;
+            var raw = title ?? string.Empty;
             var sanitized = System.Text.RegularExpressions.Regex.Replace(raw, @"[:\(\)\[\]\{\}""'™®©\p{Pd}]", " ");
             sanitized = System.Text.RegularExpressions.Regex.Replace(sanitized, @"\s{2,}", " ").Trim();
             return sanitized;
@@ -333,17 +347,19 @@ namespace RetroArr.Core.Search
             var hydraConfigs = _config.LoadHydraIndexers().Where(h => h.Enabled).ToList();
 
             var tasks = new List<(string Name, Task<List<SearchResult>> Task)>();
+            // Cancelled once the results are read, so a search still running at the deadline stops
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
             if (prowlarr.IsConfigured && prowlarr.Enabled)
             {
                 var client = new ProwlarrClient(prowlarr.Url, prowlarr.ApiKey);
-                tasks.Add(("Prowlarr", client.SearchAsync(query, indexerIds: null, categories: null)));
+                tasks.Add(("Prowlarr", client.SearchAsync(query, indexerIds: null, categories: null, ct: deadline.Token)));
             }
 
             if (jackett.IsConfigured && jackett.Enabled)
             {
                 var jClient = new JackettClient(jackett.Url, jackett.ApiKey);
-                tasks.Add(("Jackett", jClient.SearchAsync(query, categories: null).ContinueWith(t =>
+                tasks.Add(("Jackett", jClient.SearchAsync(query, categories: null, ct: deadline.Token).ContinueWith(t =>
                 {
                     if (t.IsFaulted) throw t.Exception!.InnerException ?? t.Exception;
                     if (t.Result == null) return new List<SearchResult>();
@@ -401,6 +417,7 @@ namespace RetroArr.Core.Search
                 }
             }
 
+            deadline.Cancel();
             return results;
         }
 
@@ -466,7 +483,7 @@ namespace RetroArr.Core.Search
                             .AddTorrentAsync(url, client.Category ?? string.Empty).ConfigureAwait(false);
                         break;
                     case "deluge":
-                        sent = await new DelugeClient(client.Host, client.Port, client.Password ?? string.Empty, client.UseSsl)
+                        sent = await new DelugeClient(client.Host, client.Port, client.Password ?? string.Empty, client.UseSsl, allowSelfSignedCert: client.AllowSelfSignedCert)
                             .AddTorrentAsync(url, client.Category ?? string.Empty).ConfigureAwait(false);
                         break;
                     case "sabnzbd":

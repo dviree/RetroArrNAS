@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using RetroArr.Core.Configuration;
+using RetroArr.Core.IO;
 
 namespace RetroArr.Core.Games
 {
@@ -202,59 +203,71 @@ namespace RetroArr.Core.Games
         }
 
         private static Task WriteSidecarAsync(string sidecarPath, TrashEntry entry) =>
-            File.WriteAllTextAsync(sidecarPath, JsonSerializer.Serialize(entry, new JsonSerializerOptions { WriteIndented = true }));
+            AtomicFile.WriteAllTextAsync(sidecarPath, JsonSerializer.Serialize(entry, new JsonSerializerOptions { WriteIndented = true }));
 
         public List<TrashEntry> List()
         {
             var root = GetTrashRoot();
-            var entries = new List<TrashEntry>();
-            if (!Directory.Exists(root)) return entries;
+            if (!Directory.Exists(root)) return new List<TrashEntry>();
 
-            foreach (var dir in Directory.EnumerateDirectories(root).Where(IsEntry))
-            {
-                var sidecar = Path.Combine(dir, "meta.json");
-                if (!File.Exists(sidecar)) continue;
-                try
-                {
-                    var entry = JsonSerializer.Deserialize<TrashEntry>(File.ReadAllText(sidecar));
-                    var payload = Path.GetFileName(entry?.TrashPath);
-                    if (entry == null || string.IsNullOrEmpty(payload)) continue;
-                    // The payload lies next to its sidecar, so a restore or purge never reaches outside the entry
-                    entry.TrashPath = Path.Combine(dir, payload);
-                    entries.Add(entry);
-                }
-                catch (Exception ex)
-                {
-                    _logger.Warn($"[Trash] Could not read sidecar {sidecar}: {ex.Message}");
-                }
-            }
-
+            var entries = Directory.EnumerateDirectories(root).Where(IsEntry).Select(Read).OfType<TrashEntry>().ToList();
             var metaDir = Path.Combine(root, MetaFolder);
             if (Directory.Exists(metaDir))
-                foreach (var sidecar in Directory.EnumerateFiles(metaDir, "*.json"))
-                {
-                    try
-                    {
-                        var entry = JsonSerializer.Deserialize<TrashEntry>(File.ReadAllText(sidecar));
-                        var payload = Path.GetFileName(entry?.TrashPath);
-                        if (entry == null || string.IsNullOrEmpty(payload) || entry.Id != Path.GetFileNameWithoutExtension(sidecar)) continue;
-                        // Each file lies right in the trash; nothing can point outside it
-                        if (entry.Files != null && entry.Files.Any(f => Path.GetFileName(f.Name) != f.Name || f.Name.Length == 0 || Path.IsPathRooted(f.Original) || f.Original.Split('/', '\\').Contains(".."))) continue;
-                        // The payload lies right in the trash, so a restore or purge never reaches outside it
-                        entry.TrashPath = Path.Combine(root, payload);
-                        entries.Add(entry);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.Warn($"[Trash] Could not read sidecar {sidecar}: {ex.Message}");
-                    }
-                }
-
+                entries.AddRange(Directory.EnumerateFiles(metaDir, "*.json").Select(f => ReadFlat(root, f)).OfType<TrashEntry>());
             return entries.OrderByDescending(e => e.DeletedAt).ToList();
         }
 
-        public TrashEntry? Get(string id) =>
-            List().FirstOrDefault(e => e.Id == id);
+        private static TrashEntry? Read(string dir)
+        {
+            var sidecar = Path.Combine(dir, "meta.json");
+            if (!File.Exists(sidecar)) return null;
+            try
+            {
+                var entry = JsonSerializer.Deserialize<TrashEntry>(File.ReadAllText(sidecar));
+                var payload = Path.GetFileName(entry?.TrashPath);
+                if (entry == null || string.IsNullOrEmpty(payload)) return null;
+                // The payload lies next to its sidecar, so a restore or purge never reaches outside the entry
+                entry.TrashPath = Path.Combine(dir, payload);
+                return entry;
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn($"[Trash] Could not read sidecar {sidecar}: {ex.Message}");
+                return null;
+            }
+        }
+
+        // Only this entry's sidecar: a big trash on a slow disk takes long to read whole
+        // (a flat entry: its sidecar in .trash-meta/<id>.json)
+        public TrashEntry? Get(string id)
+        {
+            if (!_entryName.IsMatch(id)) return null;
+            var root = GetTrashRoot();
+            if (Read(Path.Combine(root, id)) is { } entry && entry.Id == id) return entry;
+            var flat = Path.Combine(root, MetaFolder, id + ".json");
+            return File.Exists(flat) ? ReadFlat(root, flat) : null;
+        }
+
+        // A flat entry: its files lie right in the trash, its sidecar in .trash-meta
+        private static TrashEntry? ReadFlat(string root, string sidecar)
+        {
+            try
+            {
+                var entry = JsonSerializer.Deserialize<TrashEntry>(File.ReadAllText(sidecar));
+                var payload = Path.GetFileName(entry?.TrashPath);
+                if (entry == null || string.IsNullOrEmpty(payload) || entry.Id != Path.GetFileNameWithoutExtension(sidecar)) return null;
+                // Each file lies right in the trash; nothing can point outside it
+                if (entry.Files != null && entry.Files.Any(f => Path.GetFileName(f.Name) != f.Name || f.Name.Length == 0 || Path.IsPathRooted(f.Original) || f.Original.Split('/', '\\').Contains(".."))) return null;
+                // The payload lies right in the trash, so a restore or purge never reaches outside it
+                entry.TrashPath = Path.Combine(root, payload);
+                return entry;
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn($"[Trash] Could not read sidecar {sidecar}: {ex.Message}");
+                return null;
+            }
+        }
 
         public bool Restore(string id)
         {

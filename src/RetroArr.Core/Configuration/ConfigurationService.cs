@@ -8,6 +8,7 @@ using RetroArr.Core.MetadataSource.Igdb;
 using RetroArr.Core.Download;
 using System.Diagnostics.CodeAnalysis;
 using System.Collections.Generic;
+using RetroArr.Core.IO;
 
 namespace RetroArr.Core.Configuration
 {
@@ -187,11 +188,11 @@ namespace RetroArr.Core.Configuration
                 var raw = JsonSerializer.Serialize(obj);
                 var clone = JsonSerializer.Deserialize<T>(raw)!;
                 protectSecrets(clone);
-                File.WriteAllText(path, JsonSerializer.Serialize(clone, new JsonSerializerOptions { WriteIndented = true }));
+                AtomicFile.WriteAllText(path, JsonSerializer.Serialize(clone, new JsonSerializerOptions { WriteIndented = true }));
             }
             else
             {
-                File.WriteAllText(path, JsonSerializer.Serialize(obj, new JsonSerializerOptions { WriteIndented = true }));
+                AtomicFile.WriteAllText(path, JsonSerializer.Serialize(obj, new JsonSerializerOptions { WriteIndented = true }));
             }
         }
 
@@ -339,7 +340,7 @@ namespace RetroArr.Core.Configuration
 
         public void SaveMediaSettings(MediaSettings settings)
         {
-            try { File.WriteAllText(_mediaConfigFile, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true })); }
+            try { AtomicFile.WriteAllText(_mediaConfigFile, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true })); }
             catch (Exception ex) { _logger.Error($"Error saving media settings: {ex.Message}"); }
         }
 
@@ -383,7 +384,7 @@ namespace RetroArr.Core.Configuration
             try
             {
                 var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(_lancacheConfigFile, json);
+                AtomicFile.WriteAllText(_lancacheConfigFile, json);
             }
             catch (Exception ex) { _logger.Error($"Error saving LanCache settings: {ex.Message}"); }
         }
@@ -409,7 +410,7 @@ namespace RetroArr.Core.Configuration
 
         public void SavePostDownloadSettings(PostDownloadSettings settings)
         {
-            try { File.WriteAllText(_postDownloadConfigFile, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true })); }
+            try { AtomicFile.WriteAllText(_postDownloadConfigFile, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true })); }
             catch { }
         }
 
@@ -429,7 +430,7 @@ namespace RetroArr.Core.Configuration
 
         public void SaveHydraIndexers(List<RetroArr.Core.Indexers.HydraConfiguration> indexers)
         {
-            try { File.WriteAllText(_hydraConfigFile, JsonSerializer.Serialize(indexers, new JsonSerializerOptions { WriteIndented = true })); }
+            try { AtomicFile.WriteAllText(_hydraConfigFile, JsonSerializer.Serialize(indexers, new JsonSerializerOptions { WriteIndented = true })); }
             catch (Exception ex) { _logger.Error($"Error saving Hydra indexers: {ex.Message}"); }
         }
 
@@ -579,6 +580,15 @@ namespace RetroArr.Core.Configuration
             catch (Exception ex) { _logger.Error($"Error saving GOG settings: {ex.Message}"); }
         }
 
+        // The refresh token a GogClient holds after a refresh, when it is a new one
+        public void SaveGogRefreshToken(string? refreshToken)
+        {
+            var settings = LoadGogSettings();
+            if (string.IsNullOrEmpty(refreshToken) || refreshToken == settings.RefreshToken) return;
+            settings.RefreshToken = refreshToken;
+            SaveGogSettings(settings);
+        }
+
         public EpicSettings LoadEpicSettings()
         {
             if (File.Exists(_epicConfigFile))
@@ -623,7 +633,7 @@ namespace RetroArr.Core.Configuration
 
         public void SaveEpicMetadataSettings(EpicMetadataSettings settings)
         {
-            try { File.WriteAllText(_epicMetadataConfigFile, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true })); }
+            try { AtomicFile.WriteAllText(_epicMetadataConfigFile, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true })); }
             catch (Exception ex) { _logger.Error($"Error saving Epic metadata settings: {ex.Message}"); }
         }
 
@@ -697,7 +707,7 @@ namespace RetroArr.Core.Configuration
         {
             try
             {
-                File.WriteAllText(_cacheConfigFile, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
+                AtomicFile.WriteAllText(_cacheConfigFile, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
                 _logger.Info($"[Configuration] Cache settings saved. Enabled: {settings.Enabled}");
             }
             catch (Exception ex) { _logger.Error($"Error saving cache settings: {ex.Message}"); }
@@ -772,7 +782,7 @@ namespace RetroArr.Core.Configuration
                 settings.VerifiedSources = DedupeCaseInsensitive(settings.VerifiedSources);
                 settings.TrustedReleaseGroups = DedupeCaseInsensitive(settings.TrustedReleaseGroups);
                 settings.HackPatchTokens = DedupeCaseInsensitive(settings.HackPatchTokens);
-                File.WriteAllText(_monitorConfigFile, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
+                AtomicFile.WriteAllText(_monitorConfigFile, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
                 _logger.Info($"[Configuration] Monitor settings saved. Enabled={settings.Enabled} autoThreshold={settings.AutoDownloadThreshold}");
             }
             catch (Exception ex) { _logger.Error($"Error saving monitor settings: {ex.Message}"); }
@@ -803,7 +813,7 @@ namespace RetroArr.Core.Configuration
         {
             try
             {
-                File.WriteAllText(_loggingConfigFile, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
+                AtomicFile.WriteAllText(_loggingConfigFile, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
             }
             catch (Exception ex) { _logger.Error($"Error saving logging settings: {ex.Message}"); }
         }

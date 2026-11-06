@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useTranslation } from '../i18n/translations';
 import apiClient, { getErrorMessage } from '../api/client';
+import { formatDate } from '../utils/date';
 import './Status.css';
 
-const API_BASE = '/api/v3/downloadclient';
+const API_BASE = '/downloadclient';
 
 interface DownloadStatus {
   id: string;
@@ -108,18 +109,66 @@ interface GogDownloadStatus {
 
 type TabKey = 'activity' | 'history' | 'failed' | 'unmapped' | 'unmapped-files' | 'blacklist';
 
+const validTabs: TabKey[] = ['activity', 'history', 'failed', 'unmapped', 'unmapped-files', 'blacklist'];
+
+const tabFromHash = (hash: string): TabKey | null => {
+  const tab = hash.replace('#', '') as TabKey;
+  return validTabs.includes(tab) ? tab : null;
+};
+
+// Thousands of rows at once freeze the page for many seconds
+const PAGE_SIZE = 200;
+
+interface GameOption {
+  id: number;
+  title: string;
+}
+
+const NO_GAMES = { key: '', items: [] as GameOption[], total: 0 };
+
+// The pickers get a page of matches from the server: the whole library as options freezes the page
+function useGameSearch(enabled: boolean, search: string, platformId?: number) {
+  const [result, setResult] = useState(NO_GAMES);
+  const key = `${platformId ?? ''}|${search.trim()}`;
+  useEffect(() => {
+    if (!enabled) return;
+    let current = true;
+    const params = new URLSearchParams({ pageSize: '50' });
+    if (search.trim()) params.set('search', search.trim());
+    if (platformId) params.set('platformId', String(platformId));
+    // One request once typing pauses, not one per key
+    const timer = setTimeout(() => {
+      apiClient.get(`/game/paged?${params}`)
+        .then(r => r.data)
+        .then(data => {
+          if (!current || !Array.isArray(data?.items)) return;
+          const items = data.items.map((g: GameOption) => ({ id: g.id, title: g.title }));
+          setResult({ key, items, total: data.totalItems ?? items.length });
+        })
+        .catch(() => {});
+    }, 250);
+    return () => { current = false; clearTimeout(timer); };
+  }, [enabled, key, search, platformId]);
+  // Only the matches of this search: one picked from an older list may be missing from the new one, and the select
+  // would show another option while the id stays picked
+  return enabled && result.key === key ? result : NO_GAMES;
+}
+
+function ShowMore({ total, shown, onMore }: { total: number; shown: number; onMore: () => void }) {
+  if (total <= shown) return null;
+  return (
+    <div style={{ padding: '12px', textAlign: 'center' }}>
+      <button className="btn-secondary" onClick={onMore}>Show more ({total - shown} left)</button>
+    </div>
+  );
+}
+
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-}
-
-function formatDate(dateStr: string): string {
-  if (!dateStr) return '';
-  const d = new Date(dateStr);
-  return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 function getStateBadgeClass(state: string | number): string {
@@ -140,15 +189,19 @@ function getStateBadgeClass(state: string | number): string {
 const Status: React.FC = () => {
   const { t } = useTranslation();
   const location = useLocation();
-  const [activeTab, setActiveTab] = useState<TabKey>('activity');
+  // From the hash right away, so a link to another tab doesn't poll the queue first
+  const [activeTab, setActiveTab] = useState<TabKey>(() => tabFromHash(location.hash) ?? 'activity');
   const [counts, setCounts] = useState<Counts>({ active: 0, failed: 0, unmapped: 0, blacklisted: 0 });
+  // Rows shown in the open tab's list: a page, more on request
+  const [shownIn, setShownIn] = useState({ tab: activeTab, n: PAGE_SIZE });
+  const shown = shownIn.tab === activeTab ? shownIn.n : PAGE_SIZE;
+  const showMore = () => setShownIn({ tab: activeTab, n: shown + PAGE_SIZE });
 
   // Sync tab from URL hash
   useEffect(() => {
-    const hash = location.hash.replace('#', '') as TabKey;
-    const validTabs: TabKey[] = ['activity', 'history', 'failed', 'unmapped', 'unmapped-files', 'blacklist'];
-    if (hash && validTabs.includes(hash)) {
-      setActiveTab(hash);
+    const tab = tabFromHash(location.hash);
+    if (tab) {
+      setActiveTab(tab);
     }
   }, [location.hash]);
 
@@ -158,6 +211,7 @@ const Status: React.FC = () => {
   const [removeTarget, setRemoveTarget] = useState<DownloadStatus | null>(null);
   const [removeFiles, setRemoveFiles] = useState(true);
   const [removing, setRemoving] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
 
   // GOG download state
   const [gogDownloads, setGogDownloads] = useState<GogDownloadStatus[]>([]);
@@ -191,9 +245,9 @@ const Status: React.FC = () => {
   // Unmapped local files state
   const [unmappedFiles, setUnmappedFiles] = useState<UnmappedLocalFile[]>([]);
   const [unmappedFilesLoading, setUnmappedFilesLoading] = useState(false);
-  const [gamesList, setGamesList] = useState<Array<{ id: number; title: string; platformId: number }>>([]);
   const [mapFileModal, setMapFileModal] = useState<UnmappedLocalFile | null>(null);
   const [mapFileGameId, setMapFileGameId] = useState<number | ''>('');
+  const [mapFileSearch, setMapFileSearch] = useState('');
   const [fileError, setFileError] = useState<string | null>(null);
   const [createGameModal, setCreateGameModal] = useState<UnmappedLocalFile | null>(null);
   const [createGameTitle, setCreateGameTitle] = useState('');
@@ -201,10 +255,17 @@ const Status: React.FC = () => {
   // Platforms
   const [platforms, setPlatforms] = useState<PlatformOption[]>([]);
 
+  const mapGames = useGameSearch(!!mapModal && !!mapPlatform, mapGameSearch, platforms.find(p => p.folderName === mapPlatform)?.id);
+  // The game the download is linked to, also when the first page of matches doesn't hold it
+  const mapGameOptions = mapModal?.gameId && mapModal.gameTitle && mapGameId === mapModal.gameId && !mapGames.items.some(g => g.id === mapGameId)
+    ? [{ id: mapModal.gameId, title: mapModal.gameTitle }, ...mapGames.items]
+    : mapGames.items;
+  const mapFileGames = useGameSearch(!!mapFileModal, mapFileSearch);
+
   // Fetch platforms once
   useEffect(() => {
-    fetch('/api/v3/platform')
-      .then(r => r.json())
+    apiClient.get('/platform')
+      .then(r => r.data)
       .then(data => {
         if (Array.isArray(data)) setPlatforms(data.filter((p: PlatformOption) => p.enabled));
       })
@@ -213,8 +274,8 @@ const Status: React.FC = () => {
 
   // Fetch counts on interval
   const fetchCounts = useCallback(() => {
-    fetch(`${API_BASE}/counts`)
-      .then(r => r.json())
+    apiClient.get(`${API_BASE}/counts`)
+      .then(r => r.data)
       .then(data => setCounts(data))
       .catch(() => {});
   }, []);
@@ -244,11 +305,16 @@ const Status: React.FC = () => {
   // Activity polling
   useEffect(() => {
     if (activeTab !== 'activity') return;
+    // A poll still running is not started again: slow clients can take longer than the interval
+    let busy = false;
     const fetchQueue = () => {
-      fetch(`${API_BASE}/queue`)
-        .then(r => r.json())
+      if (busy) return;
+      busy = true;
+      apiClient.get(`${API_BASE}/queue`)
+        .then(r => r.data)
         .then(data => { if (Array.isArray(data)) setDownloads(data); })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => { busy = false; });
     };
     fetchQueue();
     let iv: ReturnType<typeof setInterval> | null = setInterval(fetchQueue, 3000);
@@ -272,8 +338,8 @@ const Status: React.FC = () => {
   useEffect(() => {
     if (activeTab !== 'activity') return;
     const fetchGog = () => {
-      fetch('/api/v3/settings/gog/download-status')
-        .then(r => r.json())
+      apiClient.get('/settings/gog/download-status')
+        .then(r => r.data)
         .then(data => { if (Array.isArray(data)) setGogDownloads(data); })
         .catch(() => {});
     };
@@ -306,8 +372,8 @@ const Status: React.FC = () => {
     params.set('page', String(historyPage));
     params.set('pageSize', '25');
 
-    fetch(`${API_BASE}/history?${params}`)
-      .then(r => r.json())
+    apiClient.get(`${API_BASE}/history?${params}`)
+      .then(r => r.data)
       .then(data => {
         setHistory(data.items || []);
         setHistoryTotalPages(data.totalPages || 1);
@@ -321,8 +387,8 @@ const Status: React.FC = () => {
 
   // Failed fetch
   const fetchFailed = useCallback(() => {
-    fetch(`${API_BASE}/history/failed`)
-      .then(r => r.json())
+    apiClient.get(`${API_BASE}/history/failed`)
+      .then(r => r.data)
       .then(data => { if (Array.isArray(data)) setFailed(data); })
       .catch(() => {});
   }, []);
@@ -333,8 +399,8 @@ const Status: React.FC = () => {
 
   // Unmapped fetch
   const fetchUnmapped = useCallback(() => {
-    fetch(`${API_BASE}/unmapped`)
-      .then(r => r.json())
+    apiClient.get(`${API_BASE}/unmapped`)
+      .then(r => r.data)
       .then(data => { if (Array.isArray(data)) setUnmapped(data); })
       .catch(() => {});
   }, []);
@@ -343,24 +409,29 @@ const Status: React.FC = () => {
     if (activeTab === 'unmapped') fetchUnmapped();
   }, [activeTab, fetchUnmapped]);
 
-  // Blacklist fetch
+  // Blacklist fetch. Only the latest request's answer is shown: an older, slower one would overwrite it.
+  const blacklistRequest = useRef(0);
   const fetchBlacklist = useCallback(() => {
+    const request = ++blacklistRequest.current;
     const params = blacklistQuery ? `?query=${encodeURIComponent(blacklistQuery)}` : '';
-    fetch(`${API_BASE}/blacklist${params}`)
-      .then(r => r.json())
-      .then(data => { if (Array.isArray(data)) setBlacklist(data); })
+    apiClient.get(`${API_BASE}/blacklist${params}`)
+      .then(r => r.data)
+      .then(data => { if (request === blacklistRequest.current && Array.isArray(data)) setBlacklist(data); })
       .catch(() => {});
   }, [blacklistQuery]);
 
   useEffect(() => {
-    if (activeTab === 'blacklist') fetchBlacklist();
+    if (activeTab !== 'blacklist') return;
+    // One request once typing pauses, not one per key
+    const timer = setTimeout(fetchBlacklist, 250);
+    return () => clearTimeout(timer);
   }, [activeTab, fetchBlacklist]);
 
   // Unmapped local files fetch
   const fetchUnmappedFiles = useCallback(() => {
     setUnmappedFilesLoading(true);
-    fetch('/api/v3/game/unmapped-files')
-      .then(r => r.json())
+    apiClient.get('/game/unmapped-files')
+      .then(r => r.data)
       .then(data => { if (Array.isArray(data)) setUnmappedFiles(data); })
       .catch(() => {})
       .finally(() => setUnmappedFilesLoading(false));
@@ -370,21 +441,25 @@ const Status: React.FC = () => {
     if (activeTab === 'unmapped-files') {
       fetchUnmappedFiles();
     }
-    if (activeTab === 'unmapped' || activeTab === 'unmapped-files') {
-      fetch('/api/v3/game')
-        .then(r => r.json())
-        .then(data => { if (Array.isArray(data)) setGamesList(data.map((g: { id: number; title: string; platformId: number }) => ({ id: g.id, title: g.title, platformId: g.platformId }))); })
-        .catch(() => {});
-    }
   }, [activeTab, fetchUnmappedFiles]);
 
   // Actions
   const handlePause = async (clientId: number, downloadId: string) => {
-    await fetch(`${API_BASE}/queue/${clientId}/${encodeURIComponent(downloadId)}/pause`, { method: 'POST' });
+    setImportError(null);
+    try {
+      await apiClient.post(`${API_BASE}/queue/${clientId}/${encodeURIComponent(downloadId)}/pause`);
+    } catch (error) {
+      setImportError(getErrorMessage(error));
+    }
   };
 
   const handleResume = async (clientId: number, downloadId: string) => {
-    await fetch(`${API_BASE}/queue/${clientId}/${encodeURIComponent(downloadId)}/resume`, { method: 'POST' });
+    setImportError(null);
+    try {
+      await apiClient.post(`${API_BASE}/queue/${clientId}/${encodeURIComponent(downloadId)}/resume`);
+    } catch (error) {
+      setImportError(getErrorMessage(error));
+    }
   };
 
   const handleDelete = async () => {
@@ -392,7 +467,7 @@ const Status: React.FC = () => {
     if (!target || removing) return;
     setRemoving(true);
     try {
-      await fetch(`${API_BASE}/queue/${target.clientId}/${encodeURIComponent(target.id)}?deleteFiles=${removeFiles}`, { method: 'DELETE' });
+      await apiClient.delete(`${API_BASE}/queue/${target.clientId}/${encodeURIComponent(target.id)}?deleteFiles=${removeFiles}`);
     } catch {
       // the next queue poll shows whether it went through
     } finally {
@@ -401,46 +476,73 @@ const Status: React.FC = () => {
     }
   };
 
+  // A manual import copies the whole download, so it gets no timeout; the server says why it refused
+  const importDownload = (clientId: number, downloadId: string) =>
+    apiClient.post(`/downloadclient/queue/${clientId}/${encodeURIComponent(downloadId)}/import`, undefined, { timeout: 0 });
+
   const handleImport = async (clientId: number, downloadId: string) => {
-    await fetch(`${API_BASE}/queue/${clientId}/${encodeURIComponent(downloadId)}/import`, { method: 'POST' });
+    setImportError(null);
+    try {
+      await importDownload(clientId, downloadId);
+    } catch (error) {
+      setImportError(getErrorMessage(error));
+    }
   };
 
   const handleGogCancel = async (trackId: string) => {
-    await fetch(`/api/v3/settings/gog/download-status/${trackId}`, { method: 'DELETE' });
+    setImportError(null);
+    try {
+      await apiClient.delete(`/settings/gog/download-status/${trackId}`);
+    } catch (error) {
+      setImportError(getErrorMessage(error));
+    }
   };
 
   const handleMapPlatform = async (d: DownloadStatus, platformFolder: string) => {
-    await fetch(`${API_BASE}/queue/map-platform`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ downloadName: d.name, clientId: d.clientId, downloadId: d.id, platformFolder })
-    });
-    setEditingPlatform(null);
+    setImportError(null);
+    try {
+      await apiClient.post(`${API_BASE}/queue/map-platform`, { downloadName: d.name, clientId: d.clientId, downloadId: d.id, platformFolder });
+      setEditingPlatform(null);
+    } catch (error) {
+      setImportError(getErrorMessage(error));
+    }
   };
 
+  // History, Failed and Blacklist have no error banner; the refreshed lists show what went through
   const handleHistoryDismiss = async (id: number) => {
-    await fetch(`${API_BASE}/history/${id}/dismiss`, { method: 'POST' });
-    fetchFailed();
-    fetchHistory();
-    fetchCounts();
+    try {
+      await apiClient.post(`${API_BASE}/history/${id}/dismiss`);
+    } catch (error) {
+      console.error('Dismiss failed:', getErrorMessage(error));
+    } finally {
+      fetchFailed();
+      fetchHistory();
+      fetchCounts();
+    }
   };
 
   const handleHistoryBlacklist = async (id: number) => {
-    await fetch(`${API_BASE}/history/${id}/blacklist`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason: 'Blacklisted by user' })
-    });
-    fetchFailed();
-    fetchHistory();
-    fetchBlacklist();
-    fetchCounts();
+    try {
+      await apiClient.post(`${API_BASE}/history/${id}/blacklist`, { reason: 'Blacklisted by user' });
+    } catch (error) {
+      console.error('Blacklist failed:', getErrorMessage(error));
+    } finally {
+      fetchFailed();
+      fetchHistory();
+      fetchBlacklist();
+      fetchCounts();
+    }
   };
 
   const handleBlacklistRemove = async (id: number) => {
-    await fetch(`${API_BASE}/blacklist/${id}`, { method: 'DELETE' });
-    fetchBlacklist();
-    fetchCounts();
+    try {
+      await apiClient.delete(`${API_BASE}/blacklist/${id}`);
+    } catch (error) {
+      console.error('Blacklist remove failed:', getErrorMessage(error));
+    } finally {
+      fetchBlacklist();
+      fetchCounts();
+    }
   };
 
   // The import's own rules pick the file type for the game and platform chosen in the dialog, until the user picks one
@@ -450,8 +552,8 @@ const Status: React.FC = () => {
     const params = new URLSearchParams({ title: mapModal.title });
     if (mapGameId) params.set('gameId', String(mapGameId));
     if (mapPlatform) params.set('platform', mapPlatform);
-    fetch(`${API_BASE}/queue/import-subfolder?${params}`)
-      .then(r => r.json())
+    apiClient.get(`${API_BASE}/queue/import-subfolder?${params}`)
+      .then(r => r.data)
       .then(data => { if (current && data?.importSubfolder) setMapFileType(data.importSubfolder); })
       .catch(() => {});
     return () => { current = false; };
@@ -459,11 +561,10 @@ const Status: React.FC = () => {
 
   const handleMapAndImport = async () => {
     if (!mapModal || !mapPlatform) return;
-    // 1. Set platform + game + subfolder mapping
-    await fetch(`${API_BASE}/queue/map-platform`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    setFileError(null);
+    try {
+      // 1. Set platform + game + subfolder mapping
+      await apiClient.post('/downloadclient/queue/map-platform', {
         downloadName: mapModal.title,
         clientId: mapModal.downloadClientId,
         downloadId: mapModal.downloadId,
@@ -472,10 +573,16 @@ const Status: React.FC = () => {
         // only shows what the import would do: unpicked, the server keeps the grab's subfolder or detects it.
         gameId: mapGameId || 0,
         importSubfolder: mapFileTouched ? mapFileType || null : null
-      })
-    });
-    // 2. Trigger import
-    await fetch(`${API_BASE}/queue/${mapModal.downloadClientId}/${encodeURIComponent(mapModal.downloadId)}/import`, { method: 'POST' });
+      });
+      // 2. Trigger import
+      await importDownload(mapModal.downloadClientId, mapModal.downloadId);
+    } catch (error) {
+      showFileError(error);
+      // The mapping may be saved although the import was refused
+      fetchUnmapped();
+      fetchCounts();
+      return;
+    }
     setMapModal(null);
     setMapPlatform('');
     setMapGameId('');
@@ -562,6 +669,7 @@ const Status: React.FC = () => {
       {/* ===== ACTIVITY TAB ===== */}
       {activeTab === 'activity' && (
         <div className="downloads-table-container">
+          {importError && <div className="modal-value small" style={{ color: 'var(--ctp-red)', padding: '8px 16px' }}>{t('error')}: {importError}</div>}
           {/* GOG Downloads Section */}
           {gogDownloads.length > 0 && (
             <>
@@ -654,7 +762,7 @@ const Status: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {downloads.map(d => (
+                {downloads.slice(0, shown).map(d => (
                   <tr key={`${d.clientId}-${d.id}`}>
                     <td>
                       <div>
@@ -733,6 +841,7 @@ const Status: React.FC = () => {
               </tbody>
             </table>
           ) : null}
+          <ShowMore total={downloads.length} shown={shown} onMore={showMore} />
         </div>
       )}
 
@@ -832,7 +941,7 @@ const Status: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {failed.map(f => (
+                {failed.slice(0, shown).map(f => (
                   <tr key={f.id}>
                     <td title={f.title}>{f.cleanTitle || f.title}</td>
                     <td><span className="platform-label">{f.platform || '-'}</span></td>
@@ -850,6 +959,7 @@ const Status: React.FC = () => {
               </tbody>
             </table>
           )}
+          <ShowMore total={failed.length} shown={shown} onMore={showMore} />
         </div>
       )}
 
@@ -897,7 +1007,7 @@ const Status: React.FC = () => {
                     <td>{formatDate(u.added)}</td>
                     <td>
                       <div className="control-actions">
-                        <button className="control-btn import-btn" onClick={() => { setMapModal(u); setMapPlatform(u.gamePlatform || ''); setMapGameId(u.gameId || ''); setMapFileType(''); setMapFileTouched(false); setMapGameSearch(''); }} title="Map & Import">
+                        <button className="control-btn import-btn" onClick={() => { setMapModal(u); setFileError(null); setMapPlatform(u.gamePlatform || ''); setMapGameId(u.gameId || ''); setMapFileType(''); setMapFileTouched(false); setMapGameSearch(''); }} title="Map & Import">
                           📥
                         </button>
                       </div>
@@ -938,7 +1048,7 @@ const Status: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {blacklist.map(b => (
+                  {blacklist.slice(0, shown).map(b => (
                     <tr key={b.id}>
                       <td>{b.title}</td>
                       <td><span className="platform-label">{b.platform || '-'}</span></td>
@@ -955,6 +1065,7 @@ const Status: React.FC = () => {
                 </tbody>
               </table>
             )}
+            <ShowMore total={blacklist.length} shown={shown} onMore={showMore} />
           </div>
         </div>
       )}
@@ -981,7 +1092,7 @@ const Status: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {unmappedFiles.map((f, idx) => (
+                  {unmappedFiles.slice(0, shown).map((f, idx) => (
                     <tr key={idx}>
                       <td><span className="platform-label">{f.platformFolder || '-'}</span></td>
                       <td className="reason-cell" title={f.folder}>{f.folder}</td>
@@ -990,7 +1101,7 @@ const Status: React.FC = () => {
                       <td>{formatDate(f.lastModified)}</td>
                       <td>
                         <div className="control-actions">
-                          <button className="control-btn import-btn" onClick={() => { setMapFileModal(f); setMapFileGameId(''); setFileError(null); }} title={t('mapToGame')}>
+                          <button className="control-btn import-btn" onClick={() => { setMapFileModal(f); setMapFileGameId(''); setMapFileSearch(''); setFileError(null); }} title={t('mapToGame')}>
                             📥
                           </button>
                           <button className="control-btn import-btn" onClick={() => { setCreateGameModal(f); setCreateGameTitle(f.folder || ''); setFileError(null); }} title="Create new game">
@@ -1003,6 +1114,7 @@ const Status: React.FC = () => {
                 </tbody>
               </table>
             )}
+            {!unmappedFilesLoading && <ShowMore total={unmappedFiles.length} shown={shown} onMore={showMore} />}
           </div>
         </div>
       )}
@@ -1044,12 +1156,7 @@ const Status: React.FC = () => {
               )}
             </div>
             {mapPlatform && (() => {
-              const platDef = platforms.find(p => p.folderName === mapPlatform);
-              const matches = gamesList.filter(g => {
-                const matchesPlatform = !platDef || g.platformId === platDef.id;
-                const matchesSearch = !mapGameSearch || g.title.toLowerCase().includes(mapGameSearch.toLowerCase());
-                return matchesPlatform && matchesSearch;
-              });
+              const matches = mapGameOptions;
               return (
                 <div className="modal-field">
                   <label>
@@ -1081,8 +1188,9 @@ const Status: React.FC = () => {
                     ))}
                   </select>
                   <div style={{ fontSize: '0.8em', color: 'var(--ctp-subtext0)', marginTop: '4px' }}>
-                    {matches.length} game{matches.length === 1 ? '' : 's'} on this platform
+                    {mapGames.total} game{mapGames.total === 1 ? '' : 's'} on this platform
                     {mapGameSearch ? ` matching "${mapGameSearch}"` : ''}
+                    {mapGames.total > mapGames.items.length ? `, first ${mapGames.items.length} shown` : ''}
                   </div>
                 </div>
               );
@@ -1091,10 +1199,11 @@ const Status: React.FC = () => {
               <div className="modal-field">
                 <label>Target Folder Preview</label>
                 <div className="modal-value small">
-                  Library/{mapPlatform}/{mapGameId ? (gamesList.find(g => g.id === mapGameId)?.title || mapModal.title) : mapModal.title}/{mapFileType === 'Patches' ? 'Patches/' : mapFileType === 'DLC' ? 'DLC/' : ''}
+                  Library/{mapPlatform}/{mapGameId ? (mapGameOptions.find(g => g.id === mapGameId)?.title || mapModal.title) : mapModal.title}/{mapFileType === 'Patches' ? 'Patches/' : mapFileType === 'DLC' ? 'DLC/' : ''}
                 </div>
               </div>
             )}
+            {fileError && <div className="modal-value small" style={{ color: 'var(--ctp-red)' }}>{t('error')}: {fileError}</div>}
             <div className="modal-actions">
               <button className="btn-secondary" onClick={() => setMapModal(null)}>Cancel</button>
               <button className="btn-primary" disabled={!mapPlatform} onClick={handleMapAndImport}>
@@ -1149,12 +1258,25 @@ const Status: React.FC = () => {
             </div>
             <div className="modal-field">
               <label>Game <span className="required">*</span></label>
+              <input
+                type="text"
+                className="filter-input"
+                placeholder="Search games by name..."
+                value={mapFileSearch}
+                onChange={e => { setMapFileSearch(e.target.value); setMapFileGameId(''); }}
+                style={{ marginBottom: '6px' }}
+              />
               <select className="filter-select" value={mapFileGameId} onChange={e => setMapFileGameId(e.target.value ? Number(e.target.value) : '')}>
                 <option value="">- Select Game -</option>
-                {gamesList.map(g => (
+                {mapFileGames.items.map(g => (
                   <option key={g.id} value={g.id}>{g.title}</option>
                 ))}
               </select>
+              {mapFileGames.total > mapFileGames.items.length && (
+                <div style={{ fontSize: '0.8em', color: 'var(--ctp-subtext0)', marginTop: '4px' }}>
+                  First {mapFileGames.items.length} of {mapFileGames.total} games, search to narrow
+                </div>
+              )}
             </div>
             {fileError && <div className="modal-value small" style={{ color: 'var(--ctp-red)' }}>{t('error')}: {fileError}</div>}
             <div className="modal-actions">

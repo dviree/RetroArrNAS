@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Diagnostics.CodeAnalysis;
+using RetroArr.Core.IO;
 
 namespace RetroArr.Core.Download.TrackedDownloads
 {
@@ -214,7 +215,7 @@ namespace RetroArr.Core.Download.TrackedDownloads
                 {
                     var entries = _cache.Values.ToList();
                     var json = JsonSerializer.Serialize(entries, new JsonSerializerOptions { WriteIndented = true });
-                    File.WriteAllText(_persistencePath, json);
+                    AtomicFile.WriteAllText(_persistencePath, json);
                 }
             }
             catch (Exception ex)

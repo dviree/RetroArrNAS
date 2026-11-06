@@ -92,11 +92,16 @@ namespace RetroArr.Api.V3.DownloadClients
             {
                 return NotFound();
             }
+            if (SendsStoredSecretElsewhere(existingClient, client.Password, client.ApiKey, client.Host, client.Port, client.UrlBase, client.UseSsl))
+            {
+                return BadRequest(new { message = AddressChangedMessage });
+            }
 
             existingClient.Name = client.Name;
             existingClient.Implementation = client.Implementation;
             existingClient.Host = client.Host;
             existingClient.Port = client.Port;
+            existingClient.UseSsl = client.UseSsl;
             existingClient.Username = client.Username;
             existingClient.Password = KeepSecret(client.Password, existingClient.Password);
             existingClient.Category = client.Category;
@@ -128,6 +133,15 @@ namespace RetroArr.Api.V3.DownloadClients
 
         public static string? KeepSecret(string? sent, string? stored) => sent == SecretPlaceholder ? stored : sent;
 
+        private const string AddressChangedMessage = "The address changed, re-enter the password or API key.";
+
+        // The placeholders only stand for the stored secrets while they still go to the stored
+        // address, or any host could collect them
+        private static bool SendsStoredSecretElsewhere(DownloadClient stored, string? password, string? apiKey, string host, int port, string? urlBase, bool useSsl) =>
+            (password == SecretPlaceholder || apiKey == SecretPlaceholder)
+            && !(string.Equals(stored.Host, host, StringComparison.OrdinalIgnoreCase) && stored.Port == port
+                && (stored.UrlBase ?? "") == (urlBase ?? "") && stored.UseSsl == useSsl);
+
         [HttpDelete("{id}")]
         public ActionResult Delete(int id)
         {
@@ -146,8 +160,6 @@ namespace RetroArr.Api.V3.DownloadClients
         public async Task<ActionResult<List<DownloadStatus>>> GetQueue()
         {
             var allDownloads = new List<DownloadStatus>();
-            // Pre-load games for GameId→Title resolution
-            List<RetroArr.Core.Games.Game>? allGames = null;
 
             foreach (var config in _clients.Where(c => c.Enable))
             {
@@ -172,7 +184,7 @@ namespace RetroArr.Api.V3.DownloadClients
                     }
                     else if (config.Implementation.Equals("Deluge", StringComparison.OrdinalIgnoreCase))
                     {
-                        client = new DelugeClient(config.Host, config.Port, config.Password ?? "", config.UseSsl, config.Category);
+                        client = new DelugeClient(config.Host, config.Port, config.Password ?? "", config.UseSsl, config.Category, config.AllowSelfSignedCert);
                     }
                     else if (config.Implementation.Equals(WatchFolderClient.ImplementationName, StringComparison.OrdinalIgnoreCase))
                     {
@@ -205,23 +217,6 @@ namespace RetroArr.Api.V3.DownloadClients
                                 if (tracked.GameId.HasValue && !d.GameId.HasValue)
                                     d.GameId = tracked.GameId;
                             }
-
-                            // Resolve game title from DB if GameId is set
-                            if (d.GameId.HasValue)
-                            {
-                                allGames ??= await _gameRepository.GetAllAsync();
-                                var game = allGames.FirstOrDefault(g => g.Id == d.GameId.Value);
-                                if (game != null)
-                                {
-                                    d.GameTitle = game.Title;
-                                    // Also set platform from game if not already detected
-                                    if (string.IsNullOrEmpty(d.PlatformFolder) && game.PlatformId > 0)
-                                    {
-                                        var platform = RetroArr.Core.Games.PlatformDefinitions.AllPlatforms.FirstOrDefault(p => p.Id == game.PlatformId);
-                                        if (platform != null) d.PlatformFolder = platform.FolderName;
-                                    }
-                                }
-                            }
                         }
 
                         // Filter by configured category so only RetroArr-managed downloads are shown
@@ -239,6 +234,21 @@ namespace RetroArr.Api.V3.DownloadClients
                 catch (Exception ex)
                 {
                     _logger.Error($"Error fetching downloads for client {config.Name}: {ex.Message}");
+                }
+            }
+
+            // Resolve game titles from DB, in one query: a client lists every seeding torrent, NZBGet its whole history
+            var games = (await _gameRepository.GetListItemsAsync(allDownloads.Where(d => d.GameId.HasValue).Select(d => d.GameId!.Value).ToHashSet()))
+                .ToDictionary(g => g.Id);
+            foreach (var d in allDownloads)
+            {
+                if (!d.GameId.HasValue || !games.TryGetValue(d.GameId.Value, out var game)) continue;
+                d.GameTitle = game.Title;
+                // Also set platform from game if not already detected
+                if (string.IsNullOrEmpty(d.PlatformFolder) && game.PlatformId > 0)
+                {
+                    var platform = RetroArr.Core.Games.PlatformDefinitions.AllPlatforms.FirstOrDefault(p => p.Id == game.PlatformId);
+                    if (platform != null) d.PlatformFolder = platform.FolderName;
                 }
             }
 
@@ -373,39 +383,41 @@ namespace RetroArr.Api.V3.DownloadClients
                 // mapping made for this download
                 var tracked = _trackedDownloadService.TrackDownload(download, clientId, config.Name ?? config.Implementation, _platformTracker);
 
-                // Force state to ImportPending for manual import
-                tracked.ClearWarnings();
-                tracked.State = TrackedDownloadState.ImportPending;
-
-                // Phase 1: Check (validates path, applies remote mapping, blacklist, unmapped)
-                await _completedDownloadService.CheckAsync(tracked, config);
-
-                // If Check blocked import, return the reason
-                if (tracked.State == TrackedDownloadState.ImportBlocked)
-                {
-                    var reason = tracked.StatusMessages.Count > 0 ? string.Join("; ", tracked.StatusMessages) : "Import blocked (unknown reason)";
-                    return BadRequest(new { message = reason });
-                }
-
-                // Phase 2: Import
-                _importStatus.MarkImporting(tracked.DownloadClientId, tracked.DownloadId);
+                // Claimed before the state changes, so the monitor doesn't import it at the same time
+                if (!_importStatus.MarkImporting(tracked.DownloadClientId, tracked.DownloadId))
+                    return Conflict(new { error = "Import already running." });
                 try
                 {
+                    // Force state to ImportPending for manual import
+                    tracked.ClearWarnings();
+                    tracked.State = TrackedDownloadState.ImportPending;
+
+                    // Phase 1: Check (validates path, applies remote mapping, blacklist, unmapped)
+                    await _completedDownloadService.CheckAsync(tracked, config);
+
+                    // If Check blocked import, return the reason
+                    if (tracked.State == TrackedDownloadState.ImportBlocked)
+                    {
+                        var reason = tracked.StatusMessages.Count > 0 ? string.Join("; ", tracked.StatusMessages) : "Import blocked (unknown reason)";
+                        return BadRequest(new { message = reason });
+                    }
+
+                    // Phase 2: Import
                     await _completedDownloadService.ImportAsync(tracked);
+
+                    if (tracked.State == TrackedDownloadState.Imported)
+                    {
+                        return Ok(new { message = $"Imported: {tracked.Title}" });
+                    }
+                    else
+                    {
+                        var reason = tracked.StatusMessages.Count > 0 ? string.Join("; ", tracked.StatusMessages) : "Import did not finish";
+                        return BadRequest(new { message = reason });
+                    }
                 }
                 finally
                 {
                     _importStatus.MarkFinished(tracked.DownloadClientId, tracked.DownloadId);
-                }
-
-                if (tracked.State == TrackedDownloadState.Imported)
-                {
-                    return Ok(new { message = $"Imported: {tracked.Title}" });
-                }
-                else
-                {
-                    var reason = tracked.StatusMessages.Count > 0 ? string.Join("; ", tracked.StatusMessages) : "Import did not finish";
-                    return BadRequest(new { message = reason });
                 }
             }
             catch (Exception ex)
@@ -426,7 +438,7 @@ namespace RetroArr.Api.V3.DownloadClients
             if (config.Implementation.Equals("NZBGet", StringComparison.OrdinalIgnoreCase))
                 return new NzbgetClient(config.Host, config.Port, config.Username ?? "", config.Password ?? "", config.UrlBase);
             if (config.Implementation.Equals("Deluge", StringComparison.OrdinalIgnoreCase))
-                return new DelugeClient(config.Host, config.Port, config.Password ?? "", config.UseSsl, category);
+                return new DelugeClient(config.Host, config.Port, config.Password ?? "", config.UseSsl, category, config.AllowSelfSignedCert);
             if (config.Implementation.Equals(WatchFolderClient.ImplementationName, StringComparison.OrdinalIgnoreCase))
                 return new WatchFolderClient(config.Host, category, config.Recursive);
             return null;
@@ -480,6 +492,10 @@ namespace RetroArr.Api.V3.DownloadClients
 
                 // Testing a saved client from its edit form sends the placeholders back
                 var stored = request.Id.HasValue ? _clients.FirstOrDefault(c => c.Id == request.Id.Value) : null;
+                if (stored != null && SendsStoredSecretElsewhere(stored, request.Password, request.ApiKey, request.Host, request.Port, request.UrlBase, request.UseSsl))
+                {
+                    return BadRequest(new { message = AddressChangedMessage });
+                }
                 request.Password = KeepSecret(request.Password, stored?.Password);
                 request.ApiKey = KeepSecret(request.ApiKey, stored?.ApiKey);
 
@@ -551,7 +567,8 @@ namespace RetroArr.Api.V3.DownloadClients
                         request.Host,
                         request.Port,
                         request.Password ?? string.Empty,
-                        request.UseSsl
+                        request.UseSsl,
+                        allowSelfSignedCert: stored?.AllowSelfSignedCert == true
                     );
 
                     isConnected = await delugeClient.TestConnectionAsync();
@@ -777,7 +794,8 @@ namespace RetroArr.Api.V3.DownloadClients
                         client.Host,
                         client.Port,
                         client.Password ?? string.Empty,
-                        client.UseSsl
+                        client.UseSsl,
+                        allowSelfSignedCert: client.AllowSelfSignedCert
                     );
                     
                     bool success = await delugeClient.AddTorrentAsync(request.Url, client.Category ?? string.Empty);
@@ -970,7 +988,8 @@ namespace RetroArr.Api.V3.DownloadClients
                      (t.State == TrackedDownloadState.ImportPending || t.State == TrackedDownloadState.ImportBlocked)))
                 .ToList();
 
-            List<RetroArr.Core.Games.Game>? allGames = null;
+            var games = (await _gameRepository.GetListItemsAsync(tracked.Where(t => t.GameId.HasValue).Select(t => t.GameId!.Value).ToHashSet()))
+                .ToDictionary(g => g.Id);
             var unmapped = new List<object>();
             foreach (var t in tracked)
             {
@@ -978,9 +997,7 @@ namespace RetroArr.Api.V3.DownloadClients
                 string? gamePlatform = null;
                 if (t.GameId.HasValue)
                 {
-                    allGames ??= await _gameRepository.GetAllAsync();
-                    var game = allGames.FirstOrDefault(g => g.Id == t.GameId.Value);
-                    if (game != null)
+                    if (games.TryGetValue(t.GameId.Value, out var game))
                     {
                         gameTitle = game.Title;
                         var plat = RetroArr.Core.Games.PlatformDefinitions.AllPlatforms.FirstOrDefault(p => p.Id == game.PlatformId);

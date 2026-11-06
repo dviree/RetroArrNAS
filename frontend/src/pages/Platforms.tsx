@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { gamesApi, platformsApi, monitorApi, type GameListDto, type Platform, type PlatformMonitorCount } from '../api/client';
+import { gamesApi, platformsApi, monitorApi, reviewsApi, type BulkReviewData, type GameListDto, type Platform, type PlatformMonitorCount } from '../api/client';
 import GameCard from '../components/GameCard';
 import { Skeleton } from '../components/retro';
 import { useRetroNavigate } from '../hooks/useRetroNavigate';
@@ -13,9 +13,25 @@ type Shelf = {
   platform: Platform;
   games: GameListDto[];
   total: number;
+  reviews: Record<number, BulkReviewData>;
 };
 
 const SHELF_PAGE_SIZE = 12;
+const SHELF_CONCURRENCY = 6;
+
+// Runs fn over items with at most `limit` calls in flight, keeping input order.
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
 
 function toSlugClass(p: Platform): string {
   const raw = (p.slug || p.name || '').toLowerCase();
@@ -62,26 +78,30 @@ export default function Platforms() {
       const platformsResp = await platformsApi.getEnabled();
       const enabled = platformsResp.data || [];
 
-      // Fire per-platform sample requests in parallel - cheap because
-      // each is capped at SHELF_PAGE_SIZE.
-      const results = await Promise.all(
-        enabled.map(async (p) => {
-          try {
-            const r = await gamesApi.getPaged({
-              platformId: p.id,
-              pageSize: SHELF_PAGE_SIZE,
-              sortOrder: 'asc',
-            });
-            return {
-              platform: p,
-              games: r.data.items || [],
-              total: r.data.totalItems || 0,
-            } as Shelf;
-          } catch {
-            return { platform: p, games: [], total: 0 } as Shelf;
-          }
-        })
-      );
+      // Per-platform sample requests, a few at a time so large platform
+      // lists don't flood the backend.
+      const results = await mapLimit(enabled, SHELF_CONCURRENCY, async (p) => {
+        try {
+          const r = await gamesApi.getPaged({
+            platformId: p.id,
+            pageSize: SHELF_PAGE_SIZE,
+            sortOrder: 'asc',
+          });
+          const games = r.data.items || [];
+          // One review request per shelf instead of one per card
+          const reviews = games.length > 0
+            ? await reviewsApi.getBulk(games.map((g) => g.id)).then((res) => res.data, () => ({}))
+            : {};
+          return {
+            platform: p,
+            games,
+            total: r.data.totalItems || 0,
+            reviews,
+          } as Shelf;
+        } catch {
+          return { platform: p, games: [], total: 0, reviews: {} } as Shelf;
+        }
+      });
 
       if (signal?.aborted) return;
       const populated = results
@@ -134,11 +154,17 @@ export default function Platforms() {
     loadShelves(controller.signal);
     loadMonitorCounts();
 
-    const handleLibraryUpdate = () => { loadShelves(); loadMonitorCounts(); };
+    // Debounced like Library: a scan fires this per batch
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const handleLibraryUpdate = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => { loadShelves(); loadMonitorCounts(); }, 2000);
+    };
     window.addEventListener('LIBRARY_UPDATED_EVENT', handleLibraryUpdate);
     return () => {
       controller.abort();
       window.removeEventListener('LIBRARY_UPDATED_EVENT', handleLibraryUpdate);
+      if (debounceTimer) clearTimeout(debounceTimer);
     };
   }, [loadShelves, loadMonitorCounts]);
 
@@ -240,6 +266,7 @@ export default function Platforms() {
                     <div key={dto.id} className="shelf__slot" role="listitem">
                       <GameCard
                         game={game}
+                        reviewData={shelf.reviews[dto.id] ?? null}
                         onMonitoredChange={handleCardMonitoredChange}
                         onClick={() => navigate(`/game/${dto.id}`, {
                           state: {
