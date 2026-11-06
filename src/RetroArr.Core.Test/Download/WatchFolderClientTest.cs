@@ -208,7 +208,7 @@ namespace RetroArr.Core.Test.Download
         {
             Write("Ghost of Yotei [PPSA12345]/ampr_assets_0001.bin");
             Write("Ghost of Yotei [PPSA12345]/eboot.bin");
-            Assert.That((await List()).Single().StatusMessages.Single(), Does.Contain("LZ4-compressed game folder (PPSA12345)"));
+            Assert.That((await List()).Single().StatusMessages.Single(), Does.Contain("compressed game folder (LZ4/zstd) (PPSA12345)"));
         }
 
         [Test]

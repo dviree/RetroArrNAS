@@ -14,7 +14,7 @@ namespace RetroArr.Core.Games
         Unknown,
         // An app0 game folder: eboot.bin and sce_sys/param.json, as the console reads it
         Folder,
-        // The same folder after LZ4 compression (ampr_assets*, *.lz4): never to be repacked or converted
+        // The same folder after LZ4 or zstd compression (ampr_assets*, *.lz4, *-zstd, *.zst): never to be repacked or converted
         Lz4Folder,
         ExfatImage,
         FfpfscImage,
@@ -69,7 +69,7 @@ namespace RetroArr.Core.Games
             if (!Directory.Exists(path)) return new(PlayStationFormat.Unknown, NullIfEmpty(idFromName), null, null, null);
 
             // An LZ4 name anywhere in the folder means the folder is compressed
-            if (Path.GetFileName(path).Contains("lz4", StringComparison.OrdinalIgnoreCase) || HasLz4Marker(path))
+            if (IsCompressedName(Path.GetFileName(path)) || HasLz4Marker(path))
             {
                 var root = FindGameRoot(path);
                 var meta = root != null ? ReadParam(root) : default;
@@ -147,7 +147,7 @@ namespace RetroArr.Core.Games
             ".ffpfsc" => PlayStationFormat.FfpfscImage,
             ".exfat" => PlayStationFormat.ExfatImage,
             ".pkg" => PlayStationFormat.Pkg,
-            ".lz4" => PlayStationFormat.Lz4Folder,
+            ".lz4" or ".zst" => PlayStationFormat.Lz4Folder,
             _ => ArchiveRegex.IsMatch(name) ? PlayStationFormat.Archive : PlayStationFormat.Unknown
         };
 
@@ -167,7 +167,7 @@ namespace RetroArr.Core.Games
                 var id = names.Select(TitleIdIn).FirstOrDefault(v => v.Length > 0);
                 bool Any(Func<string, bool> f) => names.Any(n => f(n.Replace('\\', '/')));
                 PlayStationFormat inside;
-                if (Any(n => n.Split('/').Any(p => p.StartsWith("ampr_assets", StringComparison.OrdinalIgnoreCase) || p.Contains("lz4", StringComparison.OrdinalIgnoreCase))))
+                if (Any(n => n.Split('/').Any(p => p.StartsWith("ampr_assets", StringComparison.OrdinalIgnoreCase) || IsCompressedName(p))))
                     inside = PlayStationFormat.Lz4Folder;
                 else if (Any(n => n.EndsWith("sce_sys/param.json", StringComparison.OrdinalIgnoreCase)) && Any(n => n.EndsWith("eboot.bin", StringComparison.OrdinalIgnoreCase)))
                     inside = PlayStationFormat.Folder;
@@ -196,7 +196,12 @@ namespace RetroArr.Core.Games
             Directory.EnumerateFileSystemEntries(folder, "*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true })
                 .Select(Path.GetFileName)
                 .Any(n => n != null && (n.StartsWith("ampr_assets", StringComparison.OrdinalIgnoreCase)
-                    || n.Contains("lz4", StringComparison.OrdinalIgnoreCase)));
+                    || IsCompressedName(n)));
+
+        /// <summary>A compressed PS5 game folder or file by its name: LZ4 ("-lz4", ".lz4") or zstd ("-zstd", ".zst").</summary>
+        internal static bool IsCompressedName(string? name) =>
+            name != null && (name.Contains("lz4", StringComparison.OrdinalIgnoreCase) || name.Contains("zstd", StringComparison.OrdinalIgnoreCase)
+                             || name.EndsWith(".zst", StringComparison.OrdinalIgnoreCase));
 
         // The folder itself, or the single *-app0 (or other) folder in it that holds eboot.bin and sce_sys/param.json
         private static string? FindGameRoot(string folder)

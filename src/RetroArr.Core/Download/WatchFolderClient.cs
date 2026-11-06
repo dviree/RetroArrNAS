@@ -408,7 +408,7 @@ namespace RetroArr.Core.Download
             var format = p.Format switch
             {
                 Games.PlayStationFormat.Folder => "uncompressed game folder",
-                Games.PlayStationFormat.Lz4Folder => "LZ4-compressed game folder",
+                Games.PlayStationFormat.Lz4Folder => "compressed game folder (LZ4/zstd)",
                 Games.PlayStationFormat.ExfatImage => "exFAT image",
                 Games.PlayStationFormat.FfpfscImage => "FFPFSC image",
                 Games.PlayStationFormat.Pkg => "PKG",

@@ -628,7 +628,7 @@ namespace RetroArr.Core.Download
                     _ => PlayStationFormat.Unknown
                 };
             if (!Directory.Exists(path)) return PlayStationFormat.Unknown;
-            if (Path.GetFileName(path).Contains("lz4", StringComparison.OrdinalIgnoreCase)) return PlayStationFormat.Lz4Folder;
+            if (PlayStationPackageInspector.IsCompressedName(Path.GetFileName(path))) return PlayStationFormat.Lz4Folder;
             try
             {
                 return Directory.EnumerateFileSystemEntries(path).Select(Path.GetFileName)
@@ -678,7 +678,7 @@ namespace RetroArr.Core.Download
         };
 
         private static readonly Regex ReleaseTail = new(
-            @"(?<![A-Za-z0-9])(?:PS[45]|PlayStation\s*[45]|DLC|app0|exfat|ffpfsc|lz4|fpkg|update|patch|backport|v?\d+\.\d+(?:\.\d+)*)(?![A-Za-z0-9]).*$",
+            @"(?<![A-Za-z0-9])(?:PS[45]|PlayStation\s*[45]|DLC|app0|exfat|ffpfsc|lz4|zstd|fpkg|update|patch|backport|v?\d+\.\d+(?:\.\d+)*)(?![A-Za-z0-9]).*$",
             RegexOptions.IgnoreCase);
 
         /// <summary>The title in a release name: "Ghost.of.Yotei.PS5-DUPLEX" -> "Ghost of Yotei".</summary>

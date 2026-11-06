@@ -18,7 +18,7 @@ namespace RetroArr.Core.Games
     /// <summary>
     /// Gives PS4/PS5 games in roms/ps5 and roms/ps4 that are only a title ID ("PPSA26344-app0", "CUSA00900.pkg") a
     /// real name: "Ghost of Yotei [PPSA26344] [v1.0]". LZ4 folders and the other libraries (PS_LIBRARY_EXTRA, the LZ4
-    /// library) are renamed in place too, keeping their -lz4 ending; nothing is ever moved out of them.
+    /// library, the zstd library) are renamed in place too, keeping their -lz4 or -zstd ending; nothing is ever moved out of them.
     /// The title comes from the game's own param.json/param.sfo, else from the AI. Names that already carry a title are
     /// left alone, as is anything written to in the last six hours (a converter may be at work). Every rename is logged
     /// to ps-renames.json in the config folder, so it can be undone.
@@ -483,7 +483,7 @@ namespace RetroArr.Core.Games
             var stem = Regex.Replace(name, @"\.(exfat|ffpfsc|pkg)$", "", RegexOptions.IgnoreCase);
             if (PlayStationImporter.CleanReleaseName(stem).Length == 0) return true;
             if (PlayStationImporter.IsBackport(stem)) return false;
-            stem = Regex.Replace(stem, @"[-_ ]lz4$", "", RegexOptions.IgnoreCase);
+            stem = Regex.Replace(stem, @"[-_ ](lz4|zstd)$", "", RegexOptions.IgnoreCase);
             if (Regex.IsMatch(stem, @"^\d{6}\s*-")) return true;
             if (!Regex.IsMatch(stem, @"\[(?:PPSA|CUSA|ECAS)\d{5}\]", RegexOptions.IgnoreCase)) return true;
             return Regex.Matches(stem, @"\[[^\]]*\]").Any(m => !OurTag.IsMatch(m.Value));
@@ -556,7 +556,8 @@ namespace RetroArr.Core.Games
                 && PlayStationImporter.ExtrasKind(entry, package) is { } kind)
                 package = package with { Content = kind };
             var extension = File.Exists(entry) ? Path.GetExtension(name).ToLowerInvariant() : string.Empty;
-            var suffix = Regex.IsMatch(name, @"(?i)[-_ ]lz4$") ? "-lz4" : string.Empty;
+            // The compression the old name ended in stays: -lz4 or -zstd
+            var suffix = Regex.Match(name, @"(?i)[-_ ](lz4|zstd)$") is { Success: true } c ? "-" + c.Groups[1].Value.ToLowerInvariant() : string.Empty;
             var version = package.Version ?? PlayStationImporter.VersionInName(name);
             var named = PlayStationImporter.BuildName(title, package with { TitleId = id, Version = version }, extension);
             return suffix.Length == 0 ? named : named + suffix;

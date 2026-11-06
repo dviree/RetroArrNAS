@@ -68,6 +68,8 @@ namespace RetroArr.Core.Test.Games
         [TestCase("Sackboy A Big Adventure [PPSA01289] [DLC SABAPC0000000001].pkg", false)]
         [TestCase("Onimusha [PPSA27836] [Update] [v1.02].pkg", false)]
         [TestCase("Stray PPSA02100 Backport 4.xx", false)]
+        [TestCase("PPSA26344-app0-zstd", true)]
+        [TestCase("FINAL FANTASY VII REMAKE [PPSA01903] [v1.5]-zstd", false)]
         public void OnlyNamesThatAreJustATitleId_NeedAName(string name, bool needs)
         {
             Assert.That(PlayStationLibraryNamer.NeedsName(name), Is.EqualTo(needs));
@@ -430,6 +432,20 @@ namespace RetroArr.Core.Test.Games
                 namer.Dispose();
             }
             finally { PlayStationImporter.SmallPkg = 0; }
+        }
+
+        [Test]
+        public async Task ZstdFolders_AreRenamedInPlace_KeepingTheirZstdEnding()
+        {
+            var zstd = Directory.CreateDirectory(Path.Combine(_root, "ps5zstd")).FullName;
+            Environment.SetEnvironmentVariable("PS_LIBRARY_EXTRA", _lz4 + "," + zstd);
+            Game(zstd, "PPSA26344-app0-zstd");
+
+            await _namer.RunOnceAsync();
+
+            Assert.That(Directory.EnumerateDirectories(zstd).Select(Path.GetFileName), Is.EqualTo(new[] { "Ghost of Yōtei [PPSA26344] [v1.0.2]-zstd" }),
+                "renamed where it is, never moved, and still says zstd");
+            Assert.That(PlayStationPackageInspector.Inspect(Path.Combine(zstd, "Ghost of Yōtei [PPSA26344] [v1.0.2]-zstd")).IsCompressed, Is.True);
         }
 
         [Test]

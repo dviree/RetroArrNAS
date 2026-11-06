@@ -55,7 +55,7 @@ namespace RetroArr.Core.Games
 
         // A release name rather than a title: scene dots, a group, a title ID, format or source tags
         private static readonly Regex ReleaseLike = new(
-            @"(\.\w+\.|-(DUPLEX|BlaZe|CUSA|PPSA|VENOM|LiGHTFORCE|SUXXORS|DarKmooN|NSW2U|BigBlueBox)\b|\b(PPSA|CUSA|ECAS)[-_]?\d{5}|\b(PS[345]|NSP|XCI|FPKG|app0|lz4|exfat|ffpfsc)\b|\[[^\]]*\]|_)",
+            @"(\.\w+\.|-(DUPLEX|BlaZe|CUSA|PPSA|VENOM|LiGHTFORCE|SUXXORS|DarKmooN|NSW2U|BigBlueBox)\b|\b(PPSA|CUSA|ECAS)[-_]?\d{5}|\b(PS[345]|NSP|XCI|FPKG|app0|lz4|zstd|exfat|ffpfsc)\b|\[[^\]]*\]|_)",
             RegexOptions.IgnoreCase);
 
         // A scene release, not a ROM set name: no spaces, words joined by dots, dashes or underscores, or a PS title ID
