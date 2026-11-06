@@ -118,9 +118,11 @@ ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends git python3 && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 RUN git init -q . && git fetch -q --depth 1 https://github.com/pearlxcore/OrbisPkgTool "${ORBISPKG_COMMIT}" && git checkout -q FETCH_HEAD
+RUN sed -i 's#<TargetFramework>net10.0-windows</TargetFramework>#<TargetFramework>net10.0</TargetFramework>#' OrbisPkgTool/OrbisPkgTool.csproj && \
+    grep -q '<TargetFramework>net10.0</TargetFramework>' OrbisPkgTool/OrbisPkgTool.csproj
 RUN --mount=type=cache,target=/root/.nuget/packages \
     case "$TARGETARCH" in amd64) RID=linux-x64 ;; arm64) RID=linux-arm64 ;; *) exit 1 ;; esac && \
-    dotnet publish OrbisPkgTool/OrbisPkgTool.csproj -c Release -p:TargetFramework=net10.0 \
+    dotnet publish OrbisPkgTool/OrbisPkgTool.csproj -c Release \
       -r "$RID" --self-contained true -o /opt/ps4pkg && cp LICENSE /opt/ps4pkg/LICENSE
 COPY scripts/ps4-pkg-smoke.py /tmp/ps4-pkg-smoke.py
 RUN python3 /tmp/ps4-pkg-smoke.py /opt/ps4pkg/OrbisPkgTool
