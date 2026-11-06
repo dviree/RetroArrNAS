@@ -154,6 +154,26 @@ namespace RetroArr.Core.Test.Download
         }
 
         [Test]
+        public async Task AZstdGame_GoesToTheZstdLibrary_NotRomsPs5()
+        {
+            _importer.ZstdLibrary = Path.Combine(_root, "ps5zstd");
+            var release = Directory.CreateDirectory(Path.Combine(_inbox, "[SAROS]-[PPSA07631]")).FullName;
+            Directory.CreateDirectory(Path.Combine(release, "sce_sys"));
+            File.WriteAllText(Path.Combine(release, "sce_sys", "param.json"),
+                "{\"titleId\":\"PPSA07631\",\"contentVersion\":\"01.002.000\",\"localizedParameters\":{\"defaultLanguage\":\"en-US\",\"en-US\":{\"titleName\":\"Saros\"}}}");
+            File.WriteAllText(Path.Combine(release, "eboot.bin"), "x");
+            foreach (var f in new[] { "ampr_zstd-000.pak", "ampr_zstd-001.pak", "ampr_emu.index", "package.manifest" })
+                File.WriteAllText(Path.Combine(release, f), f);
+
+            var result = await Import(release);
+
+            Assert.That(result.Success, Is.True, result.Reason);
+            Assert.That(Directory.EnumerateDirectories(_importer.ZstdLibrary).Select(Path.GetFileName), Is.EqualTo(new[] { "Saros [PPSA07631] [v1.2]-zstd" }));
+            Assert.That(File.Exists(Path.Combine(_importer.ZstdLibrary, "Saros [PPSA07631] [v1.2]-zstd", "ampr_zstd-001.pak")), Is.True);
+            Assert.That(Directory.Exists(Ps5) ? Directory.EnumerateFileSystemEntries(Ps5) : Array.Empty<string>(), Is.Empty, "nothing in roms/ps5");
+        }
+
+        [Test]
         public async Task DlcAndUpdates_NeverReplaceTheGame()
         {
             Directory.CreateDirectory(Ps5);

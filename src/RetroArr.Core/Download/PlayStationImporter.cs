@@ -161,6 +161,22 @@ namespace RetroArr.Core.Download
             return best == null ? (string.Empty, false) : (best.First().Title, names.All(IsDlc));
         }
 
+        /// <summary>Where zstd-compressed PS5 games go, PS_ZSTD_LIBRARY (default /nas/games/ps5zstd), outside roms/ps5.</summary>
+        internal string ZstdLibrary = Environment.GetEnvironmentVariable("PS_ZSTD_LIBRARY") ?? "/nas/games/ps5zstd";
+
+        /// <summary>A zstd-compressed game folder: "zstd" in its name, or ampr_zstd-*.pak / *.zst files in it.</summary>
+        internal static bool IsZstd(string path)
+        {
+            if (Path.GetFileName(Path.TrimEndingDirectorySeparator(path)).Contains("zstd", StringComparison.OrdinalIgnoreCase)) return true;
+            try
+            {
+                return Directory.Exists(path) && Directory.EnumerateFiles(path, "*", new EnumerationOptions { RecurseSubdirectories = true, MaxRecursionDepth = 3, IgnoreInaccessible = true })
+                    .Take(5000).Select(Path.GetFileName)
+                    .Any(n => n != null && (n.StartsWith("ampr_zstd", StringComparison.OrdinalIgnoreCase) || n.EndsWith(".zst", StringComparison.OrdinalIgnoreCase)));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+        }
+
         /// <summary>The game in a name of ours: "Sackboy A Big Adventure" from "Sackboy A Big Adventure [PPSA01289] [DLC ...].pkg"; null otherwise.</summary>
         internal static string? GameOfName(string name)
         {
@@ -413,9 +429,12 @@ namespace RetroArr.Core.Download
             var ps4Pkg = package.Format == PlayStationFormat.Pkg && !IsPs5(platformFolder) && package.TitleId != null;
             if (ps4Pkg)
                 folder = Ps4GameFolder(platformPath, package.TitleId!, GameTitleIn(package.TitleId!, platformPath) ?? title);
+            // A zstd-compressed PS5 game folder (ampr_zstd-*.pak) goes to the zstd library, named "<Game> [ID] [vN]-zstd"
+            var zstd = package.Format == PlayStationFormat.Lz4Folder && IsPs5(platformFolder) && IsZstd(from);
+            if (zstd) folder = ZstdLibrary;
             Directory.CreateDirectory(folder);
             var extension = isFolderGame ? string.Empty : Path.GetExtension(from).ToLowerInvariant();
-            var name = BuildName(title, package, extension);
+            var name = BuildName(title, package, extension) + (zstd ? "-zstd" : string.Empty);
             var target = Path.Combine(folder, name);
 
             // The game in any form (PKG, LZ4 folder, uncompressed folder, image) in this or a newer version, or in a

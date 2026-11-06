@@ -53,6 +53,7 @@ This fork adds what a download-and-sort pipeline on a NAS needs, so no scripts r
 | `HARDLINK_ROOT` | - | A mount of the whole volume, for hardlinks/reflinks across shares |
 | `PS_IMPORT_FOLDERS` | `true` | Import PS game folders (else they are left for a converter) |
 | `PS_PKG_FOLDER` | `pkg` | PS5 PKG folder under `ps5/` |
+| `PS_ZSTD_LIBRARY` | `/nas/games/ps5zstd` | Where a zstd-compressed PS5 game (`ampr_zstd-*.pak`) is imported, as `<Game> [ID] [vN]-zstd`, instead of roms/ps5 |
 | `PS_LIBRARY_EXTRA` | - | Other PS libraries, comma separated (an LZ4 and a zstd library): only renamed, never filled; a compressed folder (LZ4 or zstd) is never replaced |
 | `PS_BACKPORT_FOLDER` | `/nas/games/backport-updates-dlc` | Where PS5 updates, DLC and backports are kept |
 | `PS_RENAME` | `true` | Give PS entries that are only a title ID, or a release name, the game's name |
