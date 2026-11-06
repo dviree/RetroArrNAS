@@ -217,6 +217,9 @@ COPY --from=battlenetprefill /battlenetprefill /opt/battlenetprefill
 COPY --from=epicprefill /epicprefill /opt/epicprefill
 COPY --from=nscb /nscb /opt/nscb
 COPY --from=ps4pkg /opt/ps4pkg /opt/ps4pkg
+# Exercise the self-contained tool against the final image's native libraries too.
+COPY scripts/ps4-pkg-smoke.py /tmp/ps4-pkg-smoke.py
+RUN python3 /tmp/ps4-pkg-smoke.py /opt/ps4pkg/OrbisPkgTool && rm /tmp/ps4-pkg-smoke.py
 # SwitchMergeService writes the keys file there before a merge (NSC_Builder reads keys.txt next to itself)
 RUN chmod -R a+rwX /opt/nscb
 
