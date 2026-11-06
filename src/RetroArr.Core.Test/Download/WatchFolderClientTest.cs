@@ -382,6 +382,33 @@ namespace RetroArr.Core.Test.Download
         }
 
         [Test]
+        public void AFailedImport_IsTriedAgain_WhenTheWatchFolderNowReadsAnotherPlatform()
+        {
+            var configDir = Directory.CreateDirectory(Path.Combine(_root, ".config")).FullName;
+            var tracker = new DownloadPlatformTracker(configDir);
+            var service = new TrackedDownloadService(configDir);
+            DownloadStatus Seen(string? platform) => new()
+            {
+                Id = "zelda", Name = "The Legend of Zelda Ocarina of Time [0400486024DEC000] [v131072].nup",
+                DownloadPath = "/x/zelda.nup", PlatformFolder = platform, State = DownloadState.Completed
+            };
+
+            // An older RetroArr took it for N64 and its import failed
+            var tracked = service.TrackDownload(Seen("n64"), 1, "watch", tracker);
+            tracked.MarkFailed("No valid game files found");
+
+            tracked = service.TrackDownload(Seen("switch2"), 1, "watch", tracker);
+
+            Assert.That(tracked.PlatformFolder, Is.EqualTo("switch2"));
+            Assert.That(tracked.State, Is.EqualTo(TrackedDownloadState.ImportPending), "tried again");
+
+            // A platform a grab gave is kept
+            tracker.SetPlatformForDownload("Grabbed Game", "ps5");
+            var grabbed = service.TrackDownload(new DownloadStatus { Id = "g", Name = "Grabbed Game", PlatformFolder = "switch", State = DownloadState.Completed }, 1, "watch", tracker);
+            Assert.That(grabbed.PlatformFolder, Is.EqualTo("ps5"));
+        }
+
+        [Test]
         public async Task TrackedDownload_KeepsTheWatchFolderPlatform_WhenNoGrabKnowsIt()
         {
             Write("Advance Wars.gba");

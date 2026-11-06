@@ -95,12 +95,29 @@ namespace RetroArr.Core.Download.TrackedDownloads
         public TrackedDownload TrackDownload(DownloadStatus download, int clientId, string clientName, DownloadPlatformTracker grabs)
         {
             // A client that knows the platform itself (a watch folder) keeps it when no grab says otherwise
-            download.PlatformFolder = grabs.LookupByName(download.Name) ?? download.PlatformFolder;
+            var own = download.PlatformFolder;
+            var grabbed = grabs.LookupByName(download.Name);
+            download.PlatformFolder = grabbed ?? download.PlatformFolder;
             download.GameId = grabs.LookupGameId(download.Name);
             download.ImportSubfolder = grabs.LookupImportSubfolder(download.Name);
             var tracked = TrackDownload(download, clientId, clientName);
             if (!string.IsNullOrEmpty(download.PlatformFolder) && string.IsNullOrEmpty(tracked.PlatformFolder))
                 tracked.PlatformFolder = download.PlatformFolder;
+            // The client reads the files and now says another platform than an older run stored (a .nup read as nothing
+            // before RetroArr knew Switch 2): its word counts, and an import that failed on the old one is tried again
+            else if (grabbed == null && !string.IsNullOrEmpty(own) && !string.Equals(own, tracked.PlatformFolder, StringComparison.OrdinalIgnoreCase)
+                     && tracked.State is TrackedDownloadState.ImportFailed or TrackedDownloadState.ImportBlocked or TrackedDownloadState.ImportPending)
+            {
+                _logger.Info($"[TrackedDownloads] '{tracked.Title}': platform {tracked.PlatformFolder ?? "none"} -> {own}, as the client reads it now");
+                tracked.PlatformFolder = own;
+                if (tracked.State == TrackedDownloadState.ImportFailed)
+                {
+                    tracked.State = TrackedDownloadState.ImportPending;
+                    tracked.Status = TrackedDownloadStatus.Ok;
+                    tracked.StatusMessages.Clear();
+                }
+                Save();
+            }
             return tracked;
         }
 
