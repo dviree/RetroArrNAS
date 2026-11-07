@@ -101,6 +101,12 @@ namespace RetroArr.Core.Games
                         || PlayStationPackageInspector.CompareVersions(patch.Version, game.Version) <= 0) continue;
                     // A newly arrived file can still be an import in progress; wait for the entire family to settle.
                     if (family.Any(p => DateTime.UtcNow - p.Written < Settle)) continue;
+                    if (RetroArr.Core.IO.FileActions.DryRun)
+                    {
+                        RetroArr.Core.IO.FileLog.Planned("MERGE", game.Path, null,
+                            $"PS4: {game.Title} v{game.Version} with update {Path.GetFileName(patch.Path)} v{patch.Version} into one PKG; the originals would go to the trash");
+                        continue;
+                    }
                     try { if (await MergeAsync(game, patch, ordered, ct)) merged++; }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {

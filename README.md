@@ -44,12 +44,13 @@ This fork adds what a download-and-sort pipeline on a NAS needs, so no scripts r
 - Title IDs are read from the NSP's ticket when a file name lacks them
 
 **BIOS / firmware** (off by default)
-- `BIOS_SORT=dryrun` lists in `bios-sort-plan.log` what it would do and changes nothing; `BIOS_SORT=true` sorts loose files and archives dropped into the BIOS folder into a folder per platform. Folders in the BIOS folder are never touched
+- `BIOS_SORT=dryrun` lists in `files.log` what it would do and changes nothing; `BIOS_SORT=true` sorts loose files and archives dropped into the BIOS folder into a folder per platform. Folders in the BIOS folder are never touched
 
 **NAS environment**
 
 | Variable | Default | |
 |---|---|---|
+| `FILE_ACTIONS` | dry run | Everything RetroArr does to files on its own (imports, cleanup, emptying the trash, Switch/PS4 merges, PS naming, BIOS sort) is a dry run until this is `on`: nothing changes, and each step it would take is written once to `files.log` as a `WOULD ...` line. Every real move, copy, trash and delete goes to `files.log` too |
 | `OPENAI_API_KEY`, `OPENAI_MODEL`, `AI_MIN_CONFIDENCE` | off, -, 0.70 | AI naming before IGDB |
 | `HARDLINK_ROOT` | - | A mount of the whole volume, for hardlinks/reflinks across shares |
 | `PS_IMPORT_FOLDERS` | `true` | Import PS game folders (else they are left for a converter) |
@@ -58,8 +59,8 @@ This fork adds what a download-and-sort pipeline on a NAS needs, so no scripts r
 | `PS_LIBRARY_EXTRA` | - | Other PS libraries, comma separated (an LZ4 and a zstd library): only renamed, never filled; a compressed folder (LZ4 or zstd) is never replaced |
 | `PS_BACKPORT_FOLDER` | `/nas/games/backport-updates-dlc` | Where PS5 updates, DLC and backports are kept |
 | `PS_RENAME` | `true` | Give PS entries that are only a title ID, or a release name, the game's name |
-| `PS_EXTRAS_SORT` | `true` | Sorts what lies loose in the backport-updates-dlc folder into its `backport/`, `updates/` and `dlc/` folders; `false` only writes `extras-sort-plan.log` |
-| `CLEANUP` | `true` | Sends what RetroArr left behind (its PS/Switch work folders, half-written `.retroarr-*` files in roms) to the trash once untouched for `CLEANUP_DAYS`; `dryrun` only writes `cleanup-plan.log`, `false` turns it off |
+| `PS_EXTRAS_SORT` | `true` | Sorts what lies loose in the backport-updates-dlc folder into its `backport/`, `updates/` and `dlc/` folders; `false` only writes the plan to `files.log` |
+| `CLEANUP` | `true` | Sends what RetroArr left behind (its PS/Switch work folders, half-written `.retroarr-*` files in roms) to the trash once untouched for `CLEANUP_DAYS`; `dryrun` only writes the plan to `files.log`, `false` turns it off |
 | `CLEANUP_DAYS` | `2` | How long a leftover must be untouched before it goes |
 | `CLEANUP_FOLDERS` | empty | More folders whose contents go the same way, separated by `;` (an old tool's work folder, a test folder); the folders themselves stay |
 | `PS4_MERGE` | `true` | Merges two roms/ps4 folders of one game into one (a same-size copy goes to the trash); `false` only logs it |

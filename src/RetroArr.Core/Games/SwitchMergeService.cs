@@ -166,7 +166,8 @@ namespace RetroArr.Core.Games
         {
             var target = Switch2Folder;
             if (target == null) return;
-            Directory.CreateDirectory(target);
+            var dry = IO.FileActions.DryRun;
+            if (!dry) Directory.CreateDirectory(target);
             List<string> files;
             try
             {
@@ -188,6 +189,7 @@ namespace RetroArr.Core.Games
                     else _logger.Warn($"[SwitchMerge] {to} is there already; {file} stays where it is");
                     continue;
                 }
+                if (dry) { IO.FileLog.Planned("MOVE", file, to, "Switch 2 game into its own folder"); continue; }
                 try
                 {
                     MoveFile(file, to);
@@ -229,6 +231,17 @@ namespace RetroArr.Core.Games
             var state = LoadState();
             var merged = 0;
             ReadTitleId = UsesRust ? RustTitleIdReader(KeysFile, NscbRust) : null;
+            if (IO.FileActions.DryRun)
+            {
+                // Dry run: only what would be merged is written to files.log; the tidy and the leftovers wait too
+                foreach (var copy in Duplicates.Where(File.Exists)) IO.FileLog.Planned("TRASH", copy, null, "Switch: the same file is in the Switch 2 folder already");
+                Duplicates.Clear();
+                var planned = Scan(library).Concat(Directory.Exists(PartsFolder) ? Scan(PartsFolder) : new List<Part>()).ToList();
+                foreach (var family in Plan(planned))
+                    IO.FileLog.Planned("MERGE", family.Base.Path, null,
+                        $"Switch: one file with {(family.Update != null ? "update " + Path.GetFileName(family.Update.Path) + ", " : "")}{family.Dlcs.Count} DLC; the parts would go to the trash");
+                return 0;
+            }
             Tidy(library);
             foreach (var copy in Duplicates.Where(File.Exists).ToList())
                 if (await _trash.MoveAsync(copy, null, Path.GetFileName(copy)) != null) Note($"copy {copy} -> trash");

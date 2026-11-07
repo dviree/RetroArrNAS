@@ -150,6 +150,8 @@ namespace RetroArr.Core.Download
             && (tracked.FailedAt is not { } failed || DateTime.UtcNow - failed >= RetryFailedAfter)
             && (System.IO.File.Exists(tracked.OutputPath) || System.IO.Directory.Exists(tracked.OutputPath));
 
+        private readonly HashSet<string> _planned = new(StringComparer.Ordinal);
+
         internal async Task ProcessTrackedDownloadsAsync(List<DownloadClient> clients)
         {
             var trackedDownloads = _trackedDownloadService.GetTrackedDownloads();
@@ -188,6 +190,16 @@ namespace RetroArr.Core.Download
                     // Import: Process downloads that are ready
                     if (tracked.State == TrackedDownloadState.ImportPending)
                     {
+                        // Dry run (FILE_ACTIONS is not on): the import is only written down, once per download
+                        if (IO.FileActions.DryRun)
+                        {
+                            if (_planned.Add(tracked.DownloadClientId + "/" + tracked.DownloadId))
+                                IO.FileLog.Planned("IMPORT", tracked.OutputPath ?? tracked.Title, null,
+                                    $"\"{tracked.Title}\" as {tracked.PlatformFolder ?? "unknown platform"} from {clientConfig.Name} ({clientConfig.Implementation})"
+                                    + (clientConfig.DeleteSourceAfterImport && clientConfig.Implementation.Equals(WatchFolderClient.ImplementationName, StringComparison.OrdinalIgnoreCase)
+                                        ? ", then the source to the trash once every file is verified in the library" : ", the source stays"));
+                            continue;
+                        }
                         // A manual import of it is running
                         if (!_importStatus.MarkImporting(tracked.DownloadClientId, tracked.DownloadId)) continue;
                         try

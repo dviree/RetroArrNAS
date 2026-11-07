@@ -32,7 +32,8 @@ This file only says where things are. Update it when a task changes them.
   `RegroupFlatEntriesAsync` puts back into their folders any entries laid out flat by older versions.
 - `LeftoverCleaner`: every 6 h it moves old work folders, RetroArr's half-written files and `CLEANUP_FOLDERS` to the
   trash. `CLEANUP=dryrun` only writes cleanup-plan.log.
-- `IO/FileLog`: every move, copy, trash, restore, purge and delete goes to files.log and app.log, always.
+- `IO/FileActions`: unless FILE_ACTIONS=on, every job that changes files on its own is a dry run.
+- `IO/FileLog`: every move, copy, trash, restore, purge and delete, and each "WOULD ..." step of a dry run, goes to one file, files.log.
 - `BiosSorter`: off by default, with a dry run first. It never takes apart folders it did not create.
 
 ## Rules that shape the code

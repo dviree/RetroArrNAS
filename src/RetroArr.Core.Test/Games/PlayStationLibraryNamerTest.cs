@@ -235,7 +235,7 @@ namespace RetroArr.Core.Test.Games
             await _namer.RunOnceAsync();
             Assert.That(File.Exists(update) && File.Exists(dlc) && Directory.Exists(backport), Is.True, "a dry run moves nothing");
             Assert.That(_namer.SortPlan, Has.Count.EqualTo(3));
-            Assert.That(Directory.EnumerateFiles(_root, "extras-sort-plan.log", SearchOption.AllDirectories).Count(), Is.EqualTo(1));
+            Assert.That(Directory.EnumerateFiles(_root, "extras-sort-plan.log", SearchOption.AllDirectories).Count(), Is.EqualTo(0), "the plan goes to files.log, no file of its own");
 
             _namer.SortOverride = true;
             await _namer.RunOnceAsync();

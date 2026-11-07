@@ -99,8 +99,30 @@ namespace RetroArr.Core.Games
             }
         }
 
-        /// <summary>Renames what needs a name. Returns the renames made, old path to new path.</summary>
+        // Dry run (FILE_ACTIONS is not on): every move, trash and new folder is only written to files.log
+        private Task<TrashEntry?> TrashAsync(string path, int? gameId, string? title)
+        {
+            if (!IO.FileActions.DryRun) return _trash?.MoveAsync(path, gameId, title) ?? Task.FromResult<TrashEntry?>(null);
+            IO.FileLog.Planned("TRASH", path, null, "PlayStation library naming: a copy of " + title);
+            return Task.FromResult<TrashEntry?>(null);
+        }
+
+        private static void MakeDir(string path)
+        {
+            if (!IO.FileActions.DryRun) Directory.CreateDirectory(path);
+        }
+
+        /// <summary>Renames what needs a name. Returns the renames made, old path to new path (in a dry run, the planned ones).</summary>
         public async Task<List<(string From, string To)>> RunOnceAsync(CancellationToken ct = default)
+        {
+            if (!IO.FileActions.DryRun) return await RunCoreAsync(ct);
+            var rename = Rename;
+            Rename = (from, to) => IO.FileLog.Planned("MOVE", from, to, "PlayStation library naming");
+            try { return await RunCoreAsync(ct); }
+            finally { Rename = rename; }
+        }
+
+        private async Task<List<(string From, string To)>> RunCoreAsync(CancellationToken ct)
         {
             var done = new List<(string, string)>();
             _votes.Clear();
@@ -132,7 +154,7 @@ namespace RetroArr.Core.Games
                     {
                         // The same file under its right name already: this one is a copy and goes to the trash
                         if (File.Exists(entry) && File.Exists(to) && new FileInfo(entry).Length == new FileInfo(to).Length && _trash != null
-                            && await _trash.MoveAsync(entry, null, target) != null)
+                            && await TrashAsync(entry, null, target) != null)
                             _logger.Info($"[PSNames] {name} is a copy of {target}; it went to the trash");
                         else _logger.Info($"[PSNames] {name}: {target} is already there, left as it is");
                         continue;
@@ -146,7 +168,7 @@ namespace RetroArr.Core.Games
                     catch (Exception ex) { _logger.Warn($"[PSNames] Could not rename {entry}: {ex.Message}"); }
                 }
             }
-            if (done.Count > 0) Remember(done);
+            if (done.Count > 0 && !IO.FileActions.DryRun) Remember(done);
             return done;
         }
 
@@ -179,7 +201,7 @@ namespace RetroArr.Core.Games
                             var rows = _games == null ? null : await _games.GetPathRowsAsync();
                             var sharedSource = IO.SharedMount.Translate(game) ?? game;
                             string? Remap(string? path) => MovedPath(MovedPath(path, game, target), sharedSource, target);
-                            Directory.CreateDirectory(ZstdLibrary);
+                            MakeDir(ZstdLibrary);
                             Rename(game, target);
                             done.Add((game, target));
                             _logger.Info($"[PSNames] Moved complete ZSTD game {game} -> {target}");
@@ -245,7 +267,7 @@ namespace RetroArr.Core.Games
                 if (File.Exists(to)) { TrashIfCopy(pkg, to); continue; }
                 try
                 {
-                    Directory.CreateDirectory(Path.GetDirectoryName(to)!);
+                    MakeDir(Path.GetDirectoryName(to)!);
                     Rename(pkg, to);
                     done.Add((pkg, to));
                     _logger.Info($"[PSNames] Moved {name} into {Path.GetDirectoryName(to)}");
@@ -330,7 +352,7 @@ namespace RetroArr.Core.Games
                         {
                             // The same file in the game's folder already: this one is a copy and goes to the trash
                             if (File.Exists(item) && File.Exists(to) && new FileInfo(item).Length == new FileInfo(to).Length && _trash != null
-                                && _trash.MoveAsync(item, null, Path.GetFileName(item)).GetAwaiter().GetResult() != null)
+                                && TrashAsync(item, null, Path.GetFileName(item)).GetAwaiter().GetResult() != null)
                                 _logger.Info($"[PSNames] {item} is a copy of {to}; it went to the trash");
                             else _logger.Info($"[PSNames] {to} is there already, {item} stays");
                             continue;
@@ -365,7 +387,7 @@ namespace RetroArr.Core.Games
             try
             {
                 if (_trash == null || new FileInfo(file).Length != new FileInfo(existing).Length) return;
-                if (_trash.MoveAsync(file, null, Path.GetFileName(file)).GetAwaiter().GetResult() != null)
+                if (TrashAsync(file, null, Path.GetFileName(file)).GetAwaiter().GetResult() != null)
                     _logger.Info($"[PSNames] {file} is a copy of {existing}; it went to the trash");
             }
             catch (Exception ex) { _logger.Warn($"[PSNames] Could not trash the copy {file}: {ex.Message}"); }
@@ -385,7 +407,7 @@ namespace RetroArr.Core.Games
 
         // What lies loose in the extras folder from before goes into its three folders: update PKGs into updates/, DLC
         // PKGs into dlc/, everything else (a backport's release folder or file) into backport/. Never over a file of the
-        // same name. PS_EXTRAS_SORT=false only writes extras-sort-plan.log.
+        // same name. PS_EXTRAS_SORT=false (or FILE_ACTIONS not on) only writes the plan to files.log.
         private void SortExtras(List<(string, string)> done)
         {
             SortPlan.Clear();
@@ -410,7 +432,7 @@ namespace RetroArr.Core.Games
                 if (!sort) continue;
                 try
                 {
-                    Directory.CreateDirectory(into);
+                    MakeDir(into);
                     Rename(entry, to);
                     done.Add((entry, to));
                     _logger.Info($"[PSNames] Sorted {Path.GetFileName(entry)} into {into}");
@@ -420,8 +442,9 @@ namespace RetroArr.Core.Games
             if (!sort && SortPlan.Count > 0)
                 try
                 {
-                    File.WriteAllLines(Path.Combine(_config.GetConfigDirectory(), "extras-sort-plan.log"), SortPlan);
-                    _logger.Info($"[PSNames] Dry run: {SortPlan.Count} entries in {ExtrasRoot} would be sorted, see extras-sort-plan.log (PS_EXTRAS_SORT=false keeps it a dry run)");
+                    foreach (var line in SortPlan.Where(l => l.StartsWith("MOVE ", StringComparison.Ordinal)))
+                        IO.FileLog.Planned("MOVE", line[5..], null, "PlayStation extras sort (PS_EXTRAS_SORT=false)");
+                    _logger.Info($"[PSNames] Dry run: {SortPlan.Count} entries in {ExtrasRoot} would be sorted, see files.log (PS_EXTRAS_SORT=false keeps it a dry run)");
                 }
                 catch (Exception ex) { _logger.Warn($"[PSNames] Could not write the sort plan: {ex.Message}"); }
         }
@@ -465,7 +488,7 @@ namespace RetroArr.Core.Games
                     if (File.Exists(to) || Directory.Exists(to))
                     {
                         if (File.Exists(entry) && File.Exists(to) && new FileInfo(entry).Length == new FileInfo(to).Length && _trash != null
-                            && await _trash.MoveAsync(entry, null, name) != null)
+                            && await TrashAsync(entry, null, name) != null)
                         {
                             _logger.Info($"[PSNames] {entry} is a copy of {to}; it went to the trash");
                             var left = Path.GetDirectoryName(entry)!;
@@ -475,7 +498,7 @@ namespace RetroArr.Core.Games
                     }
                     try
                     {
-                        Directory.CreateDirectory(into);
+                        MakeDir(into);
                         Rename(entry, to);
                         done.Add((entry, to));
                         _logger.Info($"[PSNames] Sorted {name} into {into}");
@@ -513,7 +536,7 @@ namespace RetroArr.Core.Games
                 if (File.Exists(to)) { TrashIfCopy(pkg, to); continue; }
                 try
                 {
-                    Directory.CreateDirectory(into);
+                    MakeDir(into);
                     Rename(pkg, to);
                     done.Add((pkg, to));
                     left.Add(Path.GetDirectoryName(pkg)!);
@@ -543,7 +566,7 @@ namespace RetroArr.Core.Games
                 if (File.Exists(to)) { TrashIfCopy(pkg, to); continue; }
                 try
                 {
-                    Directory.CreateDirectory(Path.GetDirectoryName(to)!);
+                    MakeDir(Path.GetDirectoryName(to)!);
                     Rename(pkg, to);
                     done.Add((pkg, to));
                     _logger.Info($"[PSNames] Moved {pkg} into {Path.GetDirectoryName(to)}");

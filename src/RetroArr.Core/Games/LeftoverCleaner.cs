@@ -16,7 +16,7 @@ namespace RetroArr.Core.Games
     /// half-written files in the library (".retroarr-ps-*", ".retroarr-merge-*", ".retroarr-extract-*") that a crash or
     /// restart left, plus the folders the owner names in CLEANUP_FOLDERS (an old tool's work folder, a test folder).
     /// Only what was not written to for CLEANUP_DAYS (default 2) goes, never the folder itself, and nothing is deleted:
-    /// it all goes to the trash. CLEANUP=false turns it off; CLEANUP=dryrun only lists it in cleanup-plan.log.
+    /// it all goes to the trash. CLEANUP=false turns it off; CLEANUP=dryrun, or FILE_ACTIONS not on, only lists it in files.log.
     /// </summary>
     [SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes")]
     public class LeftoverCleaner : BackgroundService
@@ -50,7 +50,7 @@ namespace RetroArr.Core.Games
 
         private static string Mode => (Environment.GetEnvironmentVariable("CLEANUP") ?? "true").Trim().ToLowerInvariant();
         public static bool Enabled => Mode != "false";
-        private bool DryRun => DryRunOverride ?? Mode == "dryrun";
+        private bool DryRun => DryRunOverride ?? (Mode == "dryrun" || IO.FileActions.DryRun);
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
@@ -78,7 +78,7 @@ namespace RetroArr.Core.Games
             {
                 ct.ThrowIfCancellationRequested();
                 Plan.Add("TRASH " + entry);
-                if (DryRun) { gone++; continue; }
+                if (DryRun) { gone++; IO.FileLog.Planned("TRASH", entry, null, "cleanup: left behind, not written to for " + Age.TotalDays + " days"); continue; }
                 try
                 {
                     if (await _trash.MoveAsync(entry, null, Path.GetFileName(entry)) != null)
@@ -89,9 +89,6 @@ namespace RetroArr.Core.Games
                 }
                 catch (Exception ex) { _logger.Warn($"[Cleanup] Could not trash {entry}: {ex.Message}"); }
             }
-            if (DryRun && Plan.Count > 0)
-                try { File.WriteAllLines(Path.Combine(_config.GetConfigDirectory(), "cleanup-plan.log"), Plan); }
-                catch (Exception ex) { _logger.Warn($"[Cleanup] Could not write the plan: {ex.Message}"); }
             return gone;
         }
 

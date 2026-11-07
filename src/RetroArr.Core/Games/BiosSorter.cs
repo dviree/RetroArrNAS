@@ -42,8 +42,8 @@ namespace RetroArr.Core.Games
             _config = config;
         }
 
-        // BIOS_SORT=dryrun: nothing is moved, unpacked or trashed; what would happen goes to bios-sort-plan.log
-        internal bool DryRun = string.Equals(Environment.GetEnvironmentVariable("BIOS_SORT"), "dryrun", StringComparison.OrdinalIgnoreCase);
+        // BIOS_SORT=dryrun, or FILE_ACTIONS not on: nothing is moved, unpacked or trashed; what would happen goes to files.log
+        internal bool DryRun = string.Equals(Environment.GetEnvironmentVariable("BIOS_SORT"), "dryrun", StringComparison.OrdinalIgnoreCase) || IO.FileActions.DryRun;
         internal readonly List<string> Plan = new();
 
         // Off unless BIOS_SORT=true: on its first run it took the owner's own folders (86Box, systemroms ...) apart
@@ -207,11 +207,12 @@ namespace RetroArr.Core.Games
                 try { placed += await SortAsync(entry, name, ct); }
                 catch (Exception ex) when (ex is not OperationCanceledException) { _logger.Warn($"[BIOS] Could not sort {entry}: {ex.Message}"); }
             }
-            if (DryRun && _config != null)
-            {
-                try { File.WriteAllLines(Path.Combine(_config.GetConfigDirectory(), "bios-sort-plan.log"), new[] { $"{DateTime.UtcNow:o} dry run, nothing was changed" }.Concat(Plan)); }
-                catch (Exception ex) { _logger.Warn($"[BIOS] Could not write the plan: {ex.Message}"); }
-            }
+            if (DryRun)
+                foreach (var line in Plan)
+                {
+                    var parts = line.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+                    IO.FileLog.Planned(parts[0], parts.Length > 1 ? parts[1].Trim() : string.Empty, null, "BIOS sorter");
+                }
             return placed;
         }
 

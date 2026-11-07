@@ -116,13 +116,11 @@ namespace RetroArr.Core.Logging
             config.AddRule(NLog.LogLevel.Warn, NLog.LogLevel.Fatal, appTarget, "Microsoft.*", true);
             config.AddRule(NLog.LogLevel.Warn, NLog.LogLevel.Fatal, consoleTarget, "Microsoft.*", true);
 
-            // 2) Every file RetroArr moves, copies, trashes or deletes: always logged, in files.log and app.log,
-            //    whatever the log level, so what happened to a game can be looked up
+            // 2) Every file RetroArr moves, copies, trashes or deletes, and in a dry run what it would do: always
+            //    logged, whatever the log level, in one file of its own (files.log) and nowhere else
             var filesTarget = CreateFileTarget("files", "files", layout, archiveSize);
             config.AddTarget(filesTarget);
-            config.AddRule(NLog.LogLevel.Info, NLog.LogLevel.Fatal, filesTarget, IO.FileLog.LoggerName);
-            config.AddRule(NLog.LogLevel.Info, NLog.LogLevel.Fatal, appTarget, IO.FileLog.LoggerName);
-            config.AddRule(NLog.LogLevel.Info, NLog.LogLevel.Fatal, consoleTarget, IO.FileLog.LoggerName, true);
+            config.AddRule(NLog.LogLevel.Info, NLog.LogLevel.Fatal, filesTarget, IO.FileLog.LoggerName, true);
 
             // 3) Per-feature file targets (before catch-all so they match first)
             if (_settings.PerFeatureFiles)

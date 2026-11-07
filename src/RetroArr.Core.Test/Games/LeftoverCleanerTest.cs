@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using NUnit.Framework;
 using RetroArr.Core.Configuration;
 using RetroArr.Core.Games;
+using RetroArr.Core.IO;
 
 namespace RetroArr.Core.Test.Games
 {
@@ -100,7 +101,34 @@ namespace RetroArr.Core.Test.Games
 
             Assert.That(File.Exists(oldWork), Is.True);
             Assert.That(_cleaner.Plan, Has.One.StartsWith("TRASH").And.EndsWith("1a2b3c4d"));
-            Assert.That(File.Exists(Path.Combine(_root, "config", "cleanup-plan.log")), Is.True);
+            Assert.That(File.Exists(Path.Combine(_root, "config", "cleanup-plan.log")), Is.False, "the plan goes to files.log, no file of its own");
+        }
+
+        [Test]
+        public async Task WithoutFileActionsOn_EverythingIsADryRun_AndTheTrashIsNotEmptied()
+        {
+            _cleaner.DryRunOverride = null;
+            var oldWork = Put(Path.Combine(_work, "1a2b3c4d", "game.exfat"));
+            var config = new ConfigurationService(_root);
+            var trash = new TrashService(config);
+            var trashed = Put(Path.Combine(_root, "old-release", "game.iso"));
+            await trash.MoveAsync(Path.GetDirectoryName(trashed)!, null, "old release");
+            var media = config.LoadMediaSettings();
+            media.TrashRetentionDays = 1;
+            config.SaveMediaSettings(media);
+            var sidecar = Directory.GetFiles(Path.Combine(_root, "bin", ".trash-meta")).Single();
+            File.WriteAllText(sidecar, File.ReadAllText(sidecar).Replace(DateTime.UtcNow.Year + "-", (DateTime.UtcNow.Year - 1) + "-"));
+
+            FileActions.Override = false;
+            try
+            {
+                Assert.That(await _cleaner.RunOnceAsync(), Is.EqualTo(1));
+                Assert.That(trash.PurgeExpired(), Is.EqualTo(0));
+            }
+            finally { FileActions.Override = true; }
+
+            Assert.That(File.Exists(oldWork), Is.True, "a dry run moved something");
+            Assert.That(trash.List(), Has.Count.EqualTo(1), "a dry run emptied the trash");
         }
     }
 }

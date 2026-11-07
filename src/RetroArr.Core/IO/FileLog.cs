@@ -6,8 +6,9 @@ namespace RetroArr.Core.IO
 {
     /// <summary>
     /// One line in RetroArr's log for everything it does to a file or folder: moved, copied, renamed, sent to the
-    /// trash, put back, purged from the trash or deleted, with where from, where to and why. It all lands in app.log
-    /// and in its own files.log, whatever the log level, so what happened to a game can always be looked up.
+    /// trash, put back, purged from the trash or deleted, with where from, where to and why, and in a dry run what it
+    /// would have done. It all lands in one file, files.log, whatever the log level, so what happened to a game can
+    /// always be looked up in one place.
     /// </summary>
     [SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes")]
     public static class FileLog
@@ -21,6 +22,17 @@ namespace RetroArr.Core.IO
         public static void Restored(string from, string to, string why) => Write("RESTORE", from, to, why);
         public static void Purged(string path, string why) => Write("PURGE", path, null, why);
         public static void Deleted(string path, string why) => Write("DELETE", path, null, why);
+        /// <summary>What a dry run would have done (FILE_ACTIONS is not on): nothing was changed.</summary>
+        public static void Planned(string action, string path, string? to, string why)
+        {
+            // Each planned step once while RetroArr runs, not again on every round of the job
+            lock (_planned)
+                if (!_planned.Add(action + "|" + path + "|" + to)) return;
+            Write("WOULD " + action, path, to, why + " (dry run, nothing changed)");
+        }
+
+        private static readonly System.Collections.Generic.HashSet<string> _planned = new(StringComparer.Ordinal);
+
         public static void Failed(string action, string path, string? to, string why) => Write("FAILED " + action, path, to, why, warn: true);
 
         /// <summary>Deletes a file or a folder with everything in it, after logging it. Only for RetroArr's own work files.</summary>

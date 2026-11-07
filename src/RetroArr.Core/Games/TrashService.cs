@@ -435,6 +435,13 @@ namespace RetroArr.Core.Games
             foreach (var entry in List())
             {
                 if (entry.DeletedAt > cutoff || entry.Incomplete) continue;
+                // Dry run (FILE_ACTIONS is not on): the trash is not emptied, what would go is written down
+                if (RetroArr.Core.IO.FileActions.DryRun)
+                {
+                    RetroArr.Core.IO.FileLog.Planned("PURGE", entry.TrashPath, null,
+                        $"trash older than {days} days: it was {entry.OriginalPath}, trashed {entry.DeletedAt:yyyy-MM-dd HH:mm} UTC, {entry.SizeBytes} bytes");
+                    continue;
+                }
                 if (Purge(entry, $"older than the trash keeps things ({days} days, Settings > Media > trash retention)")) count++;
             }
             if (count > 0) _logger.Info($"[Trash] Auto-purged {count} entries older than {days}d");

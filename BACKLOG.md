@@ -3,6 +3,8 @@
 Found bugs, stubs and ideas. Put no personal data here: no owner or host names, NAS paths, or keys.
 
 ## > RESUME HERE
+- RetroArr now runs as a dry run (FILE_ACTIONS not on). Go through files.log with the owner: the "WOULD ..." lines say
+  what each job would do. Turn on only what the owner approves (FILE_ACTIONS=on in the compose override).
 - The owner reports a PS5 game folder (the PPSA26344 release) vanished. Find out where it went, from the NAS:
   files.log (new) and app.log in RetroArr's log folder; the trash's .trash-meta sidecars; a find for the title ID.
   The NAS remote session was disconnected, so this needs the owner to run the commands or reconnect.
@@ -19,6 +21,7 @@ Found bugs, stubs and ideas. Put no personal data here: no owner or host names, 
 - Upgrade trail from 0.28.1 to 0.29.0 (`trail upgrade`, then restart the agent).
 
 ## Done (latest first)
+- Every job that changes files is a dry run until FILE_ACTIONS=on. Plans and real actions all go to files.log.
 - Nothing an import is done with is deleted any more (trash instead), and every file action is logged in files.log.
 - LeftoverCleaner no longer takes a running copy or a fresh unpack for old (folder dates count).
 - The trash keeps folders whole and regroups the old flat entries.
