@@ -29,10 +29,10 @@ namespace RetroArr.Core.Download
 
         // Unpacked: the release was an archive, unpacked to staging and imported from there; the archive itself
         // has no twin in the library to verify against, a clean unpack and import is its verification
-        // AlreadyInLibrary: the game is in roms in some form, nothing was added; a watch folder in move mode lets the
-        // release go to the trash
+        // AlreadyInLibrary: the game is in roms in some form and nothing was added.
+        // KeepSource: the title already has a compressed PS5 copy, so leave the download in place.
         public sealed record Outcome(bool Success, string? Destination, string? Reason, string? Title = null, string? VerifyFrom = null, bool Unpacked = false,
-            bool AlreadyInLibrary = false, bool Backport = false)
+            bool AlreadyInLibrary = false, bool Backport = false, bool KeepSource = false)
         {
             public static Outcome Fail(string reason) => new(false, null, reason);
         }
@@ -304,13 +304,15 @@ namespace RetroArr.Core.Download
             var package = PlayStationPackageInspector.Inspect(source);
             if (package.Format == PlayStationFormat.Archive)
             {
-                var there = AlreadyThere(Path.Combine(libraryRoot, platformFolder), package, releaseName);
+                var platformPath = Path.Combine(libraryRoot, platformFolder);
+                var keepSource = IsPs5(platformFolder) && HasCompressedPs5Copy(package, platformPath);
+                var there = AlreadyThere(platformPath, package, releaseName);
                 if (there != null)
                 {
                     _logger.Info($"[PlayStation] {releaseName}: {package.TitleId} is already in {there}, nothing unpacked");
-                    return Task.FromResult(new Outcome(true, there, null, AlreadyInLibrary: true));
+                    return Task.FromResult(new Outcome(true, there, null, AlreadyInLibrary: true, KeepSource: keepSource));
                 }
-                return ImportArchiveAsync(source, releaseName, libraryRoot, platformFolder);
+                return ImportArchiveAsync(source, releaseName, libraryRoot, platformFolder, keepSource);
             }
             return ImportOneAsync(source, releaseName, libraryRoot, platformFolder, ImportFolders);
         }
@@ -322,7 +324,7 @@ namespace RetroArr.Core.Download
         /// Unpacks every archive set in the release (first volumes only) into staging, imports what came out,
         /// and removes the staging folder again. The archives themselves are only read.
         /// </summary>
-        private async Task<Outcome> ImportArchiveAsync(string source, string releaseName, string libraryRoot, string platformFolder)
+        private async Task<Outcome> ImportArchiveAsync(string source, string releaseName, string libraryRoot, string platformFolder, bool keepSource)
         {
             if (_archives == null) return Outcome.Fail("PlayStation archive: no archive support configured");
             var all = Directory.Exists(source)
@@ -365,8 +367,9 @@ namespace RetroArr.Core.Download
                     var outcome = await ImportOneAsync(item, found.Count == 1 ? releaseName : name, libraryRoot, platformFolder, true);
                     if (!outcome.Success) return outcome with { Reason = $"{Path.GetFileName(item)}: {outcome.Reason}" };
                     first ??= outcome;
+                    keepSource |= outcome.KeepSource;
                 }
-                return first! with { VerifyFrom = null, Unpacked = true };
+                return first! with { VerifyFrom = null, Unpacked = true, KeepSource = keepSource };
             }
             finally
             {
@@ -415,22 +418,24 @@ namespace RetroArr.Core.Download
 
             // PS5 fake PKGs get a folder of their own (roms/ps5/pkg); everything else, PS4 PKGs too, lies in the platform folder
             var platformPath = Path.Combine(libraryRoot, platformFolder);
-            var folder = package.Format == PlayStationFormat.Pkg && IsPs5(platformFolder) ? Path.Combine(platformPath, PkgFolder) : platformPath;
+            var isPs5 = IsPs5(platformFolder);
+            var folder = package.Format == PlayStationFormat.Pkg && isPs5 ? Path.Combine(platformPath, PkgFolder) : platformPath;
             Directory.CreateDirectory(platformPath);
             // An update or DLC is known before its title: a DLC's own name is not its game's
-            var extrasKind = package.Format == PlayStationFormat.Pkg && IsPs5(platformFolder) ? ExtrasKind(from, package) : null;
+            var extrasKind = package.Format == PlayStationFormat.Pkg && isPs5 ? ExtrasKind(from, package) : null;
             if (extrasKind != null) package = package with { Content = extrasKind.Value };
+            var keepSource = isPs5 && HasCompressedPs5Copy(package, platformPath);
             var title = await TitleForAsync(package, source, releaseName, from, platformPath);
             // A PS5 update or DLC goes with the backports, outside the library
             // (a small PS5 PKG with no readable header is one too, by its size)
             if (extrasKind != null)
                 folder = Path.Combine(ExtrasFolderFor(BackportRoot, package.Content), SafeTitle(title) is { Length: > 0 } game ? game : "");
             // A PS4 PKG goes into its game's folder, with the game's other PKGs: roms/ps4/<Game> [CUSA01234]/
-            var ps4Pkg = package.Format == PlayStationFormat.Pkg && !IsPs5(platformFolder) && package.TitleId != null;
+            var ps4Pkg = package.Format == PlayStationFormat.Pkg && !isPs5 && package.TitleId != null;
             if (ps4Pkg)
                 folder = Ps4GameFolder(platformPath, package.TitleId!, GameTitleIn(package.TitleId!, platformPath) ?? title);
             // A zstd-compressed PS5 game folder (ampr_zstd-*.pak) goes to the zstd library, named "<Game> [ID] [vN]-zstd"
-            var zstd = package.Format == PlayStationFormat.Lz4Folder && IsPs5(platformFolder) && IsZstd(from);
+            var zstd = package.Format == PlayStationFormat.Lz4Folder && isPs5 && IsZstd(from);
             if (zstd) folder = ZstdLibrary;
             Directory.CreateDirectory(folder);
             var extension = isFolderGame ? string.Empty : Path.GetExtension(from).ToLowerInvariant();
@@ -439,7 +444,7 @@ namespace RetroArr.Core.Download
 
             // The game in any form (PKG, LZ4 folder, uncompressed folder, image) in this or a newer version, or in a
             // version that can't be told, means it is already there: nothing is added. Only an older version in the
-            // same format is replaced, and never an LZ4 folder; those are the owner's to manage.
+            // same format is replaced. Compressed PS5 copies are the owner's to manage.
             var older = new List<string>();
             // PKGs are kept on their own: a PKG is added even when the game is there as an LZ4 folder, a folder or an
             // image, and those never stop or replace a PKG
@@ -452,14 +457,14 @@ namespace RetroArr.Core.Download
                 if (kind == package.Format && SizeOf(existing) == SizeOf(from))
                 {
                     _logger.Info($"[PlayStation] {releaseName} is already in the library as {existing}");
-                    return new Outcome(true, existing, null, title, from);
+                    return new Outcome(true, existing, null, title, from, KeepSource: keepSource);
                 }
                 if (!IsOlder(existing, package.Version))
                 {
                     _logger.Info($"[PlayStation] {releaseName}: already in the library as {Path.GetFileName(existing)} ({kind}), not added");
-                    return new Outcome(true, existing, null, title, AlreadyInLibrary: true);
+                    return new Outcome(true, existing, null, title, AlreadyInLibrary: true, KeepSource: keepSource);
                 }
-                if (kind == package.Format && kind != PlayStationFormat.Lz4Folder) older.Add(existing);
+                if (kind == package.Format && kind != PlayStationFormat.Lz4Folder && !(isPs5 && IsCompressedCopy(existing))) older.Add(existing);
             }
             // Folders one level down (roms/ps5/pkg, roms/ps5/_extracted) are only looked at, never changed
             // The separate zstd library is intentionally filled even when another format is present.
@@ -468,7 +473,7 @@ namespace RetroArr.Core.Download
             if (elsewhere != null)
             {
                 _logger.Info($"[PlayStation] {releaseName} is already in {elsewhere}, not added");
-                return new Outcome(true, elsewhere, null, title, AlreadyInLibrary: true);
+                return new Outcome(true, elsewhere, null, title, AlreadyInLibrary: true, KeepSource: keepSource);
             }
             if (File.Exists(target) || Directory.Exists(target))
                 return Outcome.Fail($"{name} is already in the library and is not the same release");
@@ -502,7 +507,7 @@ namespace RetroArr.Core.Download
                 }
                 catch (Exception ex) { _logger.Warn($"[PlayStation] Could not move older version {old} to the trash: {ex.Message}"); }
             }
-            return new Outcome(true, target, null, title, from);
+            return new Outcome(true, target, null, title, from, KeepSource: keepSource);
         }
 
         // param.json/param.sfo first, then the name the library already gives the title ID, then the AI, then the release name
@@ -582,6 +587,13 @@ namespace RetroArr.Core.Download
         internal static IReadOnlyList<string> OtherLibraries =>
             (Environment.GetEnvironmentVariable("PS_LIBRARY_EXTRA") ?? string.Empty)
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+        private bool HasCompressedPs5Copy(PlayStationPackage package, string platformPath) =>
+            package.Content == PlayStationContent.Game
+            && (InOtherLibraries(package, platformPath).Any(IsCompressedCopy) || InOtherLibraries(package, ZstdLibrary).Any(IsCompressedCopy));
+
+        private static bool IsCompressedCopy(string path) =>
+            PlayStationPackageInspector.IsCompressedName(Path.GetFileName(path)) || KindOf(path) == PlayStationFormat.Lz4Folder || IsZstd(path);
 
         // main: the library's own platform folder, looked into one level down too (roms/ps5/_extracted/...)
         private static IEnumerable<string> InOtherLibraries(PlayStationPackage package, string? main = null)

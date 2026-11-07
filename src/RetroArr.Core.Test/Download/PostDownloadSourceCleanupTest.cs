@@ -192,6 +192,101 @@ namespace RetroArr.Core.Test.Download
             Assert.That(Directory.Exists(source), Is.False, "verified source should be gone");
         }
 
+        [TestCase("lz4", false)]
+        [TestCase("lz4", true)]
+        [TestCase("zstd", false)]
+        [TestCase("zstd", true)]
+        public async Task WatchFolder_KeepsPs5DownloadWhenACompressedCopyExists(string format, bool archived)
+        {
+            var config = new ConfigurationService(_root);
+            var library = Path.Combine(_root, "roms");
+            var zstdLibrary = Path.Combine(_root, "ps5zstd");
+            var trash = Path.Combine(_root, "bin");
+            config.SaveMediaSettings(new MediaSettings { FolderPath = library, TrashPath = trash });
+            config.SaveDownloadClients(new List<DownloadClient>
+            {
+                new DownloadClient { Id = 1, Name = "inbox", Implementation = WatchFolderClient.ImplementationName, DeleteSourceAfterImport = true }
+            });
+            var copyRoot = format == "zstd" ? zstdLibrary : Path.Combine(library, "ps5");
+            var copy = Directory.CreateDirectory(Path.Combine(copyRoot, $"Game [PPSA01903] [v1.0]-{format}")).FullName;
+            var existingGame = Path.Combine(copy, "eboot.bin");
+            File.WriteAllText(existingGame, "compressed game");
+            var sourceDir = Directory.CreateDirectory(Path.Combine(_root, "downloads")).FullName;
+            var source = Path.Combine(sourceDir, archived ? "Game [PPSA01903].zip" : "Game [PPSA01903].ffpfsc");
+            if (archived) Zip(source, ("Game [PPSA01903].ffpfsc", "downloaded game"));
+            else File.WriteAllText(source, "downloaded game");
+
+            var previousZstdLibrary = Environment.GetEnvironmentVariable("PS_ZSTD_LIBRARY");
+            var previousStaging = Environment.GetEnvironmentVariable("PS_STAGING");
+            try
+            {
+                Environment.SetEnvironmentVariable("PS_ZSTD_LIBRARY", zstdLibrary);
+                Environment.SetEnvironmentVariable("PS_STAGING", Path.Combine(_root, "staging"));
+                var processor = new PostDownloadProcessor(config, new FileMoverService(), null!, null!,
+                    new ArchiveService(), new TitleCleanerService(), null, null, new TrashService(config));
+                var result = await processor.ProcessCompletedDownloadAsync(new DownloadStatus
+                {
+                    Id = "release", ClientId = 1, Name = Path.GetFileName(source), DownloadPath = source,
+                    PlatformFolder = "ps5", State = DownloadState.Completed
+                });
+
+                Assert.That(result.Success, Is.True, result.Reason);
+                Assert.That(File.Exists(source), Is.True, "the JDownloader release must stay in place");
+                Assert.That(File.ReadAllText(existingGame), Is.EqualTo("compressed game"));
+                Assert.That(format == "zstd" ? File.Exists(result.DestinationPath) : result.DestinationPath == copy, Is.True);
+                Assert.That(!Directory.Exists(trash) || !Directory.EnumerateFiles(trash, "*", SearchOption.AllDirectories).Any(), Is.True);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("PS_ZSTD_LIBRARY", previousZstdLibrary);
+                Environment.SetEnvironmentVariable("PS_STAGING", previousStaging);
+            }
+        }
+
+        [Test]
+        public async Task WatchFolder_ACopyOnlyInThePs5Lz4TestFolder_DoesNotBlockTheImport()
+        {
+            var config = new ConfigurationService(_root);
+            var library = Path.Combine(_root, "roms");
+            var trash = Path.Combine(_root, "bin");
+            config.SaveMediaSettings(new MediaSettings { FolderPath = library, TrashPath = trash });
+            config.SaveDownloadClients(new List<DownloadClient>
+            {
+                new DownloadClient { Id = 1, Name = "inbox", Implementation = WatchFolderClient.ImplementationName, DeleteSourceAfterImport = true }
+            });
+            var testBench = Directory.CreateDirectory(Path.Combine(_root, "ps5-lz4", "Game [PPSA01903] [v1.0]-lz4")).FullName;
+            File.WriteAllText(Path.Combine(testBench, "eboot.bin"), "lz4 test copy");
+            var sourceDir = Directory.CreateDirectory(Path.Combine(_root, "downloads")).FullName;
+            var source = Path.Combine(sourceDir, "Game [PPSA01903].ffpfsc");
+            File.WriteAllText(source, "downloaded game");
+
+            var previousExtra = Environment.GetEnvironmentVariable("PS_LIBRARY_EXTRA");
+            var previousZstd = Environment.GetEnvironmentVariable("PS_ZSTD_LIBRARY");
+            try
+            {
+                Environment.SetEnvironmentVariable("PS_LIBRARY_EXTRA", Path.GetDirectoryName(testBench));
+                Environment.SetEnvironmentVariable("PS_ZSTD_LIBRARY", Path.Combine(_root, "ps5zstd"));
+                var processor = new PostDownloadProcessor(config, new FileMoverService(), null!, null!,
+                    new ArchiveService(), new TitleCleanerService(), null, null, new TrashService(config));
+                var result = await processor.ProcessCompletedDownloadAsync(new DownloadStatus
+                {
+                    Id = "release", ClientId = 1, Name = Path.GetFileName(source), DownloadPath = source,
+                    PlatformFolder = "ps5", State = DownloadState.Completed
+                });
+
+                Assert.That(result.Success, Is.True, result.Reason);
+                Assert.That(result.DestinationPath, Does.StartWith(Path.Combine(library, "ps5")), "imported into roms/ps5");
+                Assert.That(File.Exists(result.DestinationPath), Is.True);
+                Assert.That(File.Exists(source), Is.False, "the test copy keeps nothing: the verified source goes to the trash as usual");
+                Assert.That(File.ReadAllText(Path.Combine(testBench, "eboot.bin")), Is.EqualTo("lz4 test copy"), "the test folder is untouched");
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("PS_LIBRARY_EXTRA", previousExtra);
+                Environment.SetEnvironmentVariable("PS_ZSTD_LIBRARY", previousZstd);
+            }
+        }
+
         [TestCase("extracted/Castlevania-BC-SteamRIP.com/Castlevania Belmonts Curse", "extracted/Castlevania-BC-SteamRIP.com", true)]
         [TestCase("usenet/Graveyard Keeper 2", "usenet", false)]
         public async Task ReleaseFolderWithOnlyLeftovers_GoesToo_ButNeverASortingFolder(string game, string release, bool goes)

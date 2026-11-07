@@ -1590,8 +1590,10 @@ namespace RetroArr.Core.Download
                 try { await AddMovedGameToLibraryAsync(outcome.Title ?? download.Name, outcome.Destination!, false, _metadataFactory.CreateService(), platformHint, false); }
                 catch (Exception ex) { _logger.Warn($"[PostDownload] {outcome.Destination} is in the library folder but not yet in the list, the next scan adds it: {ex.Message}"); }
             }
-            // A release of a game the library already has (an LZ4 folder in roms/ps5 means LZ4 works) goes too
-            if (moveAfterImport && (outcome.Unpacked || outcome.AlreadyInLibrary || (outcome.VerifyFrom != null && SourceVerified(outcome.VerifyFrom, outcome.Destination, null))))
+            if (moveAfterImport && outcome.KeepSource)
+                _logger.Info($"[PostDownload] Keeping {download.DownloadPath}: a compressed PS5 copy already exists");
+            if (moveAfterImport && !outcome.KeepSource
+                && (outcome.Unpacked || outcome.AlreadyInLibrary || (outcome.VerifyFrom != null && SourceVerified(outcome.VerifyFrom, outcome.Destination, null))))
             {
                 await RetireSourceAsync(download.DownloadPath!, download.Name);
                 await RetireLeftoversAsync(download);
