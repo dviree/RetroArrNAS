@@ -139,6 +139,17 @@ namespace RetroArr.Core.Download
         /// <summary>
         /// Phase 2: Process all tracked downloads through the state machine.
         /// </summary>
+        internal static TimeSpan RetryFailedAfter = TimeSpan.FromHours(1);
+        internal const int MaxFailedImports = 3;
+
+        internal static bool RetryFailedWatchFolderImport(TrackedDownloads.TrackedDownload tracked, DownloadClient client) =>
+            tracked.State == TrackedDownloads.TrackedDownloadState.ImportFailed
+            && client.Implementation.Equals(WatchFolderClient.ImplementationName, StringComparison.OrdinalIgnoreCase)
+            && tracked.FailedImports < MaxFailedImports
+            // (one that failed before this was kept has no time: it is long enough ago)
+            && (tracked.FailedAt is not { } failed || DateTime.UtcNow - failed >= RetryFailedAfter)
+            && (System.IO.File.Exists(tracked.OutputPath) || System.IO.Directory.Exists(tracked.OutputPath));
+
         internal async Task ProcessTrackedDownloadsAsync(List<DownloadClient> clients)
         {
             var trackedDownloads = _trackedDownloadService.GetTrackedDownloads();
@@ -158,6 +169,14 @@ namespace RetroArr.Core.Download
                 {
                     var clientConfig = clients.FirstOrDefault(c => c.Id == tracked.DownloadClientId);
                     if (clientConfig == null) continue;
+
+                    // A watch folder's failed import is tried again later: a file another program held for a moment
+                    // ("Source file not found" while a converter worked on it) must not leave the game out for good
+                    if (RetryFailedWatchFolderImport(tracked, clientConfig))
+                    {
+                        _logger.LogInformation("[DownloadMonitor] Trying '{Title}' again ({Count} failed so far)", tracked.Title, tracked.FailedImports);
+                        tracked.MarkImportPending();
+                    }
 
                     // Check: Validate completed downloads (ImportPending / ImportBlocked -> ready?)
                     if (tracked.State == TrackedDownloadState.ImportPending ||

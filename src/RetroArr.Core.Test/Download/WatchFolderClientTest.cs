@@ -382,6 +382,30 @@ namespace RetroArr.Core.Test.Download
         }
 
         [Test]
+        public void AFailedWatchFolderImport_IsTriedAgainLater_AFewTimes_WhileTheSourceIsThere()
+        {
+            var source = Write("Ghost/PPSA26344-app0/eboot.bin");
+            var folder = Path.GetDirectoryName(Path.GetDirectoryName(source))!;
+            var watch = new DownloadClient { Id = 1, Implementation = WatchFolderClient.ImplementationName };
+            var torrent = new DownloadClient { Id = 2, Implementation = "qBittorrent" };
+            var tracked = new RetroArr.Core.Download.TrackedDownloads.TrackedDownload { Title = "Ghost", OutputPath = folder };
+            tracked.MarkFailed("Source file not found: ...xmesh");
+
+            Assert.That(DownloadMonitorService.RetryFailedWatchFolderImport(tracked, watch), Is.False, "not at once");
+            tracked.FailedAt = DateTime.UtcNow.AddHours(-2);
+            Assert.That(DownloadMonitorService.RetryFailedWatchFolderImport(tracked, watch), Is.True, "an hour later");
+            Assert.That(DownloadMonitorService.RetryFailedWatchFolderImport(tracked, torrent), Is.False, "watch folders only");
+
+            tracked.FailedImports = DownloadMonitorService.MaxFailedImports;
+            Assert.That(DownloadMonitorService.RetryFailedWatchFolderImport(tracked, watch), Is.False, "not for ever");
+            tracked.FailedImports = 1;
+            tracked.OutputPath = Path.Combine(_root, "gone");
+            Assert.That(DownloadMonitorService.RetryFailedWatchFolderImport(tracked, watch), Is.False, "nothing to import any more");
+            var older = new RetroArr.Core.Download.TrackedDownloads.TrackedDownload { Title = "Ghost", OutputPath = folder, State = RetroArr.Core.Download.TrackedDownloads.TrackedDownloadState.ImportFailed };
+            Assert.That(DownloadMonitorService.RetryFailedWatchFolderImport(older, watch), Is.True, "one that failed before failures had a time");
+        }
+
+        [Test]
         public void AFailedImport_IsTriedAgain_WhenTheWatchFolderNowReadsAnotherPlatform()
         {
             var configDir = Directory.CreateDirectory(Path.Combine(_root, ".config")).FullName;

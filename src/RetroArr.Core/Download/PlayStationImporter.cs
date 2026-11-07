@@ -318,7 +318,8 @@ namespace RetroArr.Core.Download
         }
 
         private static readonly Regex ArchiveFile = new(@"\.(rar|7z|zip|001)$", RegexOptions.IgnoreCase);
-        private static readonly Regex LaterRarPart = new(@"\.part0*([2-9]|\d{2,})\.rar$", RegexOptions.IgnoreCase);
+        // part2.rar, part02.rar, part10.rar are later volumes; part1.rar and part01.rar are the first
+        internal static readonly Regex LaterRarPart = new(@"\.part0*([2-9]|[1-9]\d+)\.rar$", RegexOptions.IgnoreCase);
 
         /// <summary>
         /// Unpacks every archive set in the release (first volumes only) into staging, imports what came out,

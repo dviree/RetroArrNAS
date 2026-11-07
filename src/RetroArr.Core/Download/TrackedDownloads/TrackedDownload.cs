@@ -32,6 +32,10 @@ namespace RetroArr.Core.Download.TrackedDownloads
         public bool IsUnmapped { get; set; }
         // The game's MissingSince this download was imported again for, so each flag reopens it once
         public DateTime? ReimportedFor { get; set; }
+
+        // When the last import failed, and how many times: a watch folder's failed import is tried again later
+        public DateTime? FailedAt { get; set; }
+        public int FailedImports { get; set; }
         // Why the client reported no usable path, refreshed on every poll
         [System.Text.Json.Serialization.JsonIgnore]
         public string? ClientMessage { get; set; }
@@ -72,6 +76,8 @@ namespace RetroArr.Core.Download.TrackedDownloads
         {
             State = TrackedDownloadState.ImportFailed;
             Status = TrackedDownloadStatus.Error;
+            FailedAt = DateTime.UtcNow;
+            FailedImports++;
             StatusMessages.Clear();
             StatusMessages.Add(reason);
         }

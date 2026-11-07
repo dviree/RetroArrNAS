@@ -183,6 +183,18 @@ namespace RetroArr.Core.Test.Download
                 Is.EquivalentTo(original == null ? Array.Empty<string>() : new[] { original }), "roms/ps5 is unchanged");
         }
 
+        [TestCase("[DLPSGAME.COM]-PPSA26344-DUPLEX.part01.rar", false)]
+        [TestCase("[DLPSGAME.COM]-PPSA26344-DUPLEX.part02.rar", true)]
+        [TestCase("[DLPSGAME.COM]-PPSA26344-DUPLEX.part10.rar", true)]
+        [TestCase("Game.part1.rar", false)]
+        [TestCase("Game.part001.rar", false)]
+        [TestCase("Game.part2.rar", true)]
+        [TestCase("Game.part011.rar", true)]
+        public void TheFirstRarVolume_IsTold_FromTheLaterOnes(string name, bool later)
+        {
+            Assert.That(PlayStationImporter.LaterRarPart.IsMatch(name), Is.EqualTo(later));
+        }
+
         [Test]
         public async Task DlcAndUpdates_NeverReplaceTheGame()
         {
