@@ -466,7 +466,7 @@ namespace RetroArr.Core.Test.Games
         }
 
         [Test]
-        public async Task ATrashedFolder_IsLaidOutFlat_AndComesBackWhole()
+        public async Task ATrashedFolder_StaysWholeInTheTrash_AndComesBackWhole()
         {
             var game = Game();
             var before = Contents(game);
@@ -474,11 +474,29 @@ namespace RetroArr.Core.Test.Games
 
             var entry = await trash.MoveAsync(game);
 
-            Assert.That(Directory.GetDirectories(_trash).Where(d => !Path.GetFileName(d).StartsWith('.')), Is.Empty, "no folders in the trash");
-            Assert.That(Directory.GetFiles(_trash).Select(Path.GetFileName), Is.EquivalentTo(new[] { "Disc 1.bin", "Disc 2.bin", "ff7.srm" }));
-            Assert.That(trash.Restore(entry!.Id), Is.True);
+            Assert.That(Directory.GetFiles(_trash), Is.Empty, "no loose files in the trash");
+            Assert.That(Contents(entry!.TrashPath), Is.EqualTo(before), "its files in its own folder, as they lay");
+            Assert.That(trash.Restore(entry.Id), Is.True);
             Assert.That(Contents(game), Is.EqualTo(before), "every file back where it was in the folder");
-            Assert.That(Directory.GetFiles(_trash), Is.Empty);
+        }
+
+        [Test]
+        public async Task FilesLaidOutFlatBefore_GoBackIntoTheirFolder_AndStillComeBackWhole()
+        {
+            var game = Game();
+            var before = Contents(game);
+            var entry = await new TrashService(_config) { Flatten = true }.MoveAsync(game);
+            Assert.That(Directory.GetFiles(_trash), Is.Not.Empty, "laid out flat, as the trash did before");
+            var trash = new TrashService(_config);
+
+            Assert.That(await trash.RegroupFlatEntriesAsync(), Is.EqualTo(1));
+
+            Assert.That(Directory.GetFiles(_trash), Is.Empty, "no loose files left");
+            var listed = trash.Get(entry!.Id)!;
+            Assert.That(Contents(listed.TrashPath), Is.EqualTo(before), "back in their folder as they lay");
+            Assert.That(await trash.RegroupFlatEntriesAsync(), Is.Zero, "once");
+            Assert.That(trash.Restore(entry.Id), Is.True);
+            Assert.That(Contents(game), Is.EqualTo(before));
         }
     }
 }

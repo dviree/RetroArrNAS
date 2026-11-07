@@ -384,7 +384,9 @@ namespace RetroArr.Core.Test.Games
 
             Assert.That(Directory.Exists(Path.Combine(_switch, "Inazuma Eleven")), Is.False);
             Assert.That(Directory.Exists(Path.Combine(_switch, "Kingdom Hearts")), Is.True);
-            Assert.That(Directory.EnumerateFiles(Path.Combine(_root, "bin")).Select(Path.GetFileName), Is.EquivalentTo(new[] { "update.rar", "info.nfo" }));
+            var inBin = Path.Combine(_root, "bin", "Inazuma Eleven");
+            Assert.That(Directory.EnumerateFiles(inBin, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(inBin, f).Replace('\\', '/')),
+                Is.EquivalentTo(new[] { "Update v1245184/update.rar", "info.nfo" }), "in its own folder in the bin, as it lay");
         }
 
         [Test]

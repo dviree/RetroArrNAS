@@ -166,7 +166,50 @@ namespace RetroArr.Core.Games
 
         // The files of a trashed folder go right into the trash, each under its own name, so the trash is easy to look
         // through. Renames within the trash only; the sidecar is written after each, so it always says where all lies.
-        internal bool Flatten = true;
+        // Off: the owner wants a trashed folder kept whole, its files in it, under its own name in the trash
+        internal bool Flatten = false;
+
+        /// <summary>
+        /// Puts the files of entries laid out flat before (each file loose in the trash) back into their folder, as
+        /// they lay where they came from. Only renames inside the trash, never over a file; returns how many entries.
+        /// </summary>
+        public async Task<int> RegroupFlatEntriesAsync()
+        {
+            var root = GetTrashRoot();
+            var metaDir = Path.Combine(root, MetaFolder);
+            if (!Directory.Exists(metaDir)) return 0;
+            var regrouped = 0;
+            foreach (var sidecar in Directory.EnumerateFiles(metaDir, "*.json").ToList())
+            {
+                var entry = ReadFlat(root, sidecar);
+                if (entry?.Files == null || entry.Files.Count == 0 || !entry.IsDirectory) continue;
+                try
+                {
+                    var folder = Directory.Exists(entry.TrashPath) || File.Exists(entry.TrashPath) ? FreeName(root, Path.GetFileName(entry.TrashPath)) : entry.TrashPath;
+                    var left = new List<TrashedFile>();
+                    foreach (var file in entry.Files)
+                    {
+                        var from = Path.Combine(root, file.Name);
+                        var to = Path.GetFullPath(Path.Combine(folder, file.Original));
+                        // Stays inside its folder (ReadFlat refused ".." and rooted paths already)
+                        if (!File.Exists(from) || File.Exists(to) || !to.StartsWith(Path.GetFullPath(folder) + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                        {
+                            if (File.Exists(from)) left.Add(file);
+                            continue;
+                        }
+                        Directory.CreateDirectory(Path.GetDirectoryName(to)!);
+                        File.Move(from, to);
+                    }
+                    entry.TrashPath = folder;
+                    entry.Files = left.Count == 0 ? null : left;
+                    await WriteSidecarAsync(sidecar, entry);
+                    regrouped++;
+                    _logger.Info($"[Trash] Put the files of {entry.OriginalPath} back into their folder {folder}");
+                }
+                catch (Exception ex) { _logger.Warn($"[Trash] Could not put the files of entry {entry.Id} back in their folder: {ex.Message}"); }
+            }
+            return regrouped;
+        }
 
         private async Task FlattenAsync(TrashEntry entry, string root, string sidecarPath)
         {

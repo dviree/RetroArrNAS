@@ -70,6 +70,10 @@ namespace RetroArr.Core.Games
         {
             Plan.Clear();
             var gone = 0;
+            // The trash keeps each folder whole: entries laid out flat before go back into their folders
+            if (!DryRun)
+                try { await _trash.RegroupFlatEntriesAsync(); }
+                catch (Exception ex) { _logger.Warn($"[Cleanup] Could not regroup the trash: {ex.Message}"); }
             foreach (var entry in Leftovers())
             {
                 ct.ThrowIfCancellationRequested();
