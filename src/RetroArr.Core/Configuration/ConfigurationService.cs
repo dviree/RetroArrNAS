@@ -89,6 +89,8 @@ namespace RetroArr.Core.Configuration
             try
             {
                 Directory.CreateDirectory(_configDirectory);
+                // The owner's archive passwords, one per line, as in JDownloader's list
+                IO.ArchiveService.PasswordFile ??= Path.Combine(_configDirectory, "archive-passwords.txt");
                 _logger.Info($"[Configuration] Service initialized. Using Config Directory: {_configDirectory}");
             }
             catch (Exception ex)

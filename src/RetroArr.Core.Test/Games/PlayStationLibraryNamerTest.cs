@@ -489,7 +489,10 @@ namespace RetroArr.Core.Test.Games
 
             await _namer.RunOnceAsync();
 
-            Assert.That(File.ReadAllText(marker), Is.EqualTo("compressed"));
+            // Kept where it is; once settled its name ends in -zstd, so the owner sees what it is
+            var kept = recent ? marker : Path.Combine(Directory.GetDirectories(_lz4).Single(), "ampr_zstd-000.pak");
+            if (!recent) Assert.That(Path.GetDirectoryName(kept), Does.EndWith("-zstd"));
+            Assert.That(File.ReadAllText(kept), Is.EqualTo("compressed"));
             if (!recent) Assert.That(File.ReadAllText(Path.Combine(_namer.ZstdLibrary, Path.GetFileName(game), "existing")), Is.EqualTo("keep"));
         }
 

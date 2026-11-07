@@ -165,6 +165,10 @@ namespace RetroArr.Core.Download
         internal string ZstdLibrary = Environment.GetEnvironmentVariable("PS_ZSTD_LIBRARY") ?? "/nas/games/ps5zstd";
 
         /// <summary>A zstd-compressed game folder: "zstd" in its name, or ampr_zstd-*.pak / *.zst files in it.</summary>
+        /// <summary>"-zstd" or "-lz4" for a compressed PS5 game folder, by what is in it; empty for anything else.</summary>
+        internal static string CompressionSuffix(string folder, PlayStationFormat format) =>
+            format != PlayStationFormat.Lz4Folder ? string.Empty : IsZstd(folder) ? "-zstd" : "-lz4";
+
         internal static bool IsZstd(string path)
         {
             if (Path.GetFileName(Path.TrimEndingDirectorySeparator(path)).Contains("zstd", StringComparison.OrdinalIgnoreCase)) return true;
@@ -436,7 +440,8 @@ namespace RetroArr.Core.Download
             if (zstd) folder = ZstdLibrary;
             Directory.CreateDirectory(folder);
             var extension = isFolderGame ? string.Empty : Path.GetExtension(from).ToLowerInvariant();
-            var name = BuildName(title, package, extension) + (zstd ? "-zstd" : string.Empty);
+            // A compressed game folder says which in its name: "-lz4" or "-zstd" at the end
+            var name = BuildName(title, package, extension) + (isFolderGame ? CompressionSuffix(from, package.Format) : string.Empty);
             var target = Path.Combine(folder, name);
 
             // The game in any form (PKG, LZ4 folder, uncompressed folder, image) in this or a newer version, or in a

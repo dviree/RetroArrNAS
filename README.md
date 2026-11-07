@@ -51,11 +51,12 @@ This fork adds what a download-and-sort pipeline on a NAS needs, so no scripts r
 | Variable | Default | |
 |---|---|---|
 | `FILE_ACTIONS` | dry run | Everything RetroArr does to files on its own (imports, cleanup, emptying the trash, Switch/PS4 merges, PS naming, BIOS sort) is a dry run until this is `on`: nothing changes, and each step it would take is written once to `files.log` as a `WOULD ...` line. Every real move, copy, trash and delete goes to `files.log` too |
+| `ARCHIVE_PASSWORDS`, `ARCHIVE_PASSWORDS_FILE` | -, `archive-passwords.txt` in the config folder | A locked rar/7z is opened as JDownloader does: the passwords in the list (one per line, or `;`-separated in the variable), then what the names hold (a site tag like `[SITE.COM]`, a domain, the release name) |
 | `OPENAI_API_KEY`, `OPENAI_MODEL`, `AI_MIN_CONFIDENCE` | off, -, 0.70 | AI naming before IGDB |
 | `HARDLINK_ROOT` | - | A mount of the whole volume, for hardlinks/reflinks across shares |
 | `PS_IMPORT_FOLDERS` | `true` | Import PS game folders (else they are left for a converter) |
 | `PS_PKG_FOLDER` | `pkg` | PS5 PKG folder under `ps5/` |
-| `PS_ZSTD_LIBRARY` | `/nas/games/ps5zstd` | Where a zstd-compressed PS5 game (`ampr_zstd-*.pak`) is imported, as `<Game> [ID] [vN]-zstd`, instead of roms/ps5 |
+| `PS_ZSTD_LIBRARY` | `/nas/games/ps5zstd` | Where a zstd-compressed PS5 game (`ampr_zstd-*.pak`) is imported, as `<Game> [ID] [vN]-zstd`, instead of roms/ps5. A compressed game folder always ends in `-lz4` or `-zstd`, by what is in it |
 | `PS_LIBRARY_EXTRA` | - | Other PS libraries, comma separated (an LZ4 and a zstd library): only renamed, never filled; a compressed folder (LZ4 or zstd) is never replaced |
 | `PS_BACKPORT_FOLDER` | `/nas/games/backport-updates-dlc` | Where PS5 updates, DLC and backports are kept |
 | `PS_RENAME` | `true` | Give PS entries that are only a title ID, or a release name, the game's name |

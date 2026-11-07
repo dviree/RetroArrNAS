@@ -21,6 +21,8 @@ Found bugs, stubs and ideas. Put no personal data here: no owner or host names, 
 - Upgrade trail from 0.28.1 to 0.29.0 (`trail upgrade`, then restart the agent).
 
 ## Done (latest first)
+- Compressed PS5 game folders always end in -lz4 or -zstd (by content), on import and by the namer.
+- Locked rar/7z: passwords tried as JDownloader does (archive-passwords.txt, ARCHIVE_PASSWORDS, names).
 - Every job that changes files is a dry run until FILE_ACTIONS=on. Plans and real actions all go to files.log.
 - Nothing an import is done with is deleted any more (trash instead), and every file action is logged in files.log.
 - LeftoverCleaner no longer takes a running copy or a fresh unpack for old (folder dates count).

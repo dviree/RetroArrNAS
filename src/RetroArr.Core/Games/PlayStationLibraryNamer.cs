@@ -144,7 +144,7 @@ namespace RetroArr.Core.Games
                     var name = Path.GetFileName(entry);
                     if (name.StartsWith('.')) continue;
                     // A converter may still be at work on what changed lately
-                    if (!(NeedsName(name) || NameSaysNothing(entry) || TitleDisagrees(entry)) || RecentlyWritten(entry)) continue;
+                    if (!(NeedsName(name) || NameSaysNothing(entry) || TitleDisagrees(entry) || LacksCompression(entry)) || RecentlyWritten(entry)) continue;
                     // A second folder of a PS4 game keeps its name: the game's name is the folder it is merged into
                     if (_otherCopies.Contains(entry)) continue;
                     var target = await NewNameAsync(entry);
@@ -599,6 +599,19 @@ namespace RetroArr.Core.Games
         /// A PKG or image whose name carries no title ID ("sable.pkg") but whose own header does: it is named from that
         /// like a title-ID-only name.
         /// </summary>
+        /// <summary>A compressed game folder whose name does not end in "-lz4" or "-zstd" (by what is in it).</summary>
+        internal static bool LacksCompression(string entry)
+        {
+            if (!Directory.Exists(entry)) return false;
+            try
+            {
+                var package = PlayStationPackageInspector.Inspect(entry);
+                var suffix = PlayStationImporter.CompressionSuffix(package.GameFolder ?? entry, package.Format);
+                return suffix.Length > 0 && !Path.GetFileName(entry).EndsWith(suffix, StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception) { return false; }
+        }
+
         internal static bool NameSaysNothing(string entry)
         {
             var name = Path.GetFileName(entry);
@@ -662,8 +675,10 @@ namespace RetroArr.Core.Games
                 && PlayStationImporter.ExtrasKind(entry, package) is { } kind)
                 package = package with { Content = kind };
             var extension = File.Exists(entry) ? Path.GetExtension(name).ToLowerInvariant() : string.Empty;
-            // The compression the old name ended in stays: -lz4 or -zstd
-            var suffix = Regex.Match(name, @"(?i)[-_ ](lz4|zstd)$") is { Success: true } c ? "-" + c.Groups[1].Value.ToLowerInvariant() : string.Empty;
+            // A compressed folder says which at the end, by what is in it: -lz4 or -zstd; else the ending the old name had
+            var suffix = Directory.Exists(entry) && package.Format == PlayStationFormat.Lz4Folder
+                ? PlayStationImporter.CompressionSuffix(package.GameFolder ?? entry, package.Format)
+                : Regex.Match(name, @"(?i)[-_ ](lz4|zstd)$") is { Success: true } c ? "-" + c.Groups[1].Value.ToLowerInvariant() : string.Empty;
             var version = package.Version ?? PlayStationImporter.VersionInName(name);
             var named = PlayStationImporter.BuildName(title, package with { TitleId = id, Version = version }, extension);
             return suffix.Length == 0 ? named : named + suffix;
