@@ -2,6 +2,16 @@
 
 This is the NAS edition of RetroArr (see the "NAS edition" section of README.md).
 
+## Memory files
+
+- Start from `SNAPSHOT.md` (where things are) and the "> RESUME HERE" block in `BACKLOG.md` (what is open). Then go to trail.
+- When a task is done, update all three files:
+  - `BACKLOG.md`: move the item to Done, and add new bugs and ideas.
+  - `SNAPSHOT.md`: update it when the architecture changed.
+  - `CLAUDE.md`: add a line when the owner corrected how work is done here.
+- Commit them with the change.
+- Keep all three short and free of personal data.
+
 ## Use Trail-code on every change
 
 The repo is wired for [Trail-code](https://github.com/trailhq/Trail-Code): a code map and the learnings earlier
