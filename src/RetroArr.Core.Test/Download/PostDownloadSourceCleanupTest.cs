@@ -196,7 +196,9 @@ namespace RetroArr.Core.Test.Download
         [TestCase("lz4", true)]
         [TestCase("zstd", false)]
         [TestCase("zstd", true)]
-        public async Task WatchFolder_KeepsPs5DownloadWhenACompressedCopyExists(string format, bool archived)
+        // roms/ps5 decides: a game there in any form (an LZ4 folder too) is in the library, and a copy only in the
+        // zstd library is not; either way the verified JDownloader release goes to the trash
+        public async Task WatchFolder_Ps5Download_RomsPs5Decides_AndTheReleaseGoesToTheTrash(string format, bool archived)
         {
             var config = new ConfigurationService(_root);
             var library = Path.Combine(_root, "roms");
@@ -231,10 +233,13 @@ namespace RetroArr.Core.Test.Download
                 });
 
                 Assert.That(result.Success, Is.True, result.Reason);
-                Assert.That(File.Exists(source), Is.True, "the JDownloader release must stay in place");
-                Assert.That(File.ReadAllText(existingGame), Is.EqualTo("compressed game"));
-                Assert.That(format == "zstd" ? File.Exists(result.DestinationPath) : result.DestinationPath == copy, Is.True);
-                Assert.That(!Directory.Exists(trash) || !Directory.EnumerateFiles(trash, "*", SearchOption.AllDirectories).Any(), Is.True);
+                Assert.That(File.Exists(source), Is.False, "the release goes to the trash");
+                Assert.That(Directory.EnumerateFiles(trash, "*", SearchOption.AllDirectories).Any(), Is.True, "nothing deleted, it is in the trash");
+                Assert.That(File.ReadAllText(existingGame), Is.EqualTo("compressed game"), "the compressed copy is untouched");
+                if (format == "zstd")
+                    Assert.That(result.DestinationPath, Does.StartWith(Path.Combine(library, "ps5")).And.Matches<string>(File.Exists), "imported into roms/ps5: the zstd library does not count");
+                else
+                    Assert.That(result.DestinationPath, Is.EqualTo(copy), "the LZ4 folder in roms/ps5 is the game");
             }
             finally
             {
