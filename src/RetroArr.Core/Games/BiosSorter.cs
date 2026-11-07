@@ -61,6 +61,7 @@ namespace RetroArr.Core.Games
             if (DryRun) { Plan.Add($"MOVE   {from} -> {to}"); return; }
             Directory.CreateDirectory(Path.GetDirectoryName(to)!);
             File.Move(from, to);
+            IO.FileLog.Moved(from, to, "BIOS sorter");
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)

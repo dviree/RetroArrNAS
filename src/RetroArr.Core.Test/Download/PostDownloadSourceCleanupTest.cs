@@ -95,6 +95,11 @@ namespace RetroArr.Core.Test.Download
             else
             {
                 Assert.That(Directory.Exists(source), Is.False, "usenet source should still be cleaned up");
+                // Nothing deleted: the whole release, its archive and .nfo too, is in the trash
+                var trashed = new TrashService(config).List().Single();
+                Assert.That(trashed.OriginalPath, Is.EqualTo(source));
+                var inTrash = Directory.EnumerateFiles(trashed.TrashPath, "*", SearchOption.AllDirectories).Select(Path.GetFileName).ToList();
+                Assert.That(inTrash, Is.SupersetOf(new[] { "game.zip", "release.nfo" }), "the archive and the .nfo were deleted");
             }
         }
 

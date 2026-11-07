@@ -131,14 +131,16 @@ namespace RetroArr.Core.Games
             catch (Exception) { return Array.Empty<string>(); }
         }
 
-        // Not written to for Age: the newest file inside a folder counts
+        // Not written to for Age: the newest file or folder inside counts. A copy or an unpacked archive keeps its
+        // files' old dates, but the folders it creates are new, so a copy or an unpack still running is never old.
         private bool Old(string entry)
         {
             try
             {
                 var newest = Directory.Exists(entry)
-                    ? Directory.EnumerateFiles(entry, "*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true })
-                        .Take(20000).Select(File.GetLastWriteTimeUtc).DefaultIfEmpty(Directory.GetLastWriteTimeUtc(entry)).Max()
+                    ? Directory.EnumerateFileSystemEntries(entry, "*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true })
+                        .Take(50000).Select(e => Directory.Exists(e) ? Directory.GetLastWriteTimeUtc(e) : File.GetLastWriteTimeUtc(e))
+                        .Append(Directory.GetLastWriteTimeUtc(entry)).Max()
                     : File.GetLastWriteTimeUtc(entry);
                 return DateTime.UtcNow - newest >= Age;
             }

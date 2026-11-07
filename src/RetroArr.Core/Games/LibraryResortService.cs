@@ -784,6 +784,7 @@ namespace RetroArr.Core.Games
                 case OperationType.DeleteEmptyDir:
                     if (Directory.Exists(op.SourcePath) && !Directory.EnumerateFileSystemEntries(op.SourcePath).Any())
                     {
+                        IO.FileLog.Deleted(op.SourcePath, "empty folder left after a library re-sort");
                         Directory.Delete(op.SourcePath);
                     }
                     op.Status = OperationStatus.Applied;
@@ -891,13 +892,14 @@ namespace RetroArr.Core.Games
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(to)!);
                     File.Move(from, to);
+                    IO.FileLog.Moved(from, to, "library re-sort");
                     moved.Add((from, to));
                 }
             }
             catch
             {
                 moved.Reverse();
-                foreach (var (from, to) in moved) File.Move(to, from);
+                foreach (var (from, to) in moved) { File.Move(to, from); IO.FileLog.Moved(to, from, "library re-sort undone after an error"); }
                 throw;
             }
         }
@@ -1423,6 +1425,7 @@ namespace RetroArr.Core.Games
             if (!string.Equals(source, target, StringComparison.OrdinalIgnoreCase) || !File.Exists(target))
             {
                 File.Move(source, target);
+                IO.FileLog.Moved(source, target, "library re-sort");
                 return;
             }
             var temp = target + ".tmp-case";
@@ -1431,6 +1434,7 @@ namespace RetroArr.Core.Games
             {
                 if (File.Exists(target)) throw new IOException($"Target already exists: {target}");
                 File.Move(temp, target);
+                IO.FileLog.Moved(source, target, "library re-sort (case change)");
             }
             catch
             {

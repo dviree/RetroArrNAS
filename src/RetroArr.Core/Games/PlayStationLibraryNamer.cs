@@ -658,6 +658,7 @@ namespace RetroArr.Core.Games
             {
                 if (Directory.Exists(f)) Directory.Move(f, t); else File.Move(f, t);
             }
+            IO.FileLog.Moved(from, to, "PlayStation library naming");
         }
 
         private void Remember(List<(string From, string To)> renames)

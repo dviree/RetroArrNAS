@@ -146,6 +146,7 @@ namespace RetroArr.Core.Games
                 if (family.Any(p => !Unchanged(p))) throw new IOException("An input changed during output validation.");
                 ct.ThrowIfCancellationRequested();
                 File.Move(partial, target); // Atomic publication; never replaces a file that appeared meanwhile.
+                RetroArr.Core.IO.FileLog.Moved(partial, target, $"PS4 merge of {game.Title} published");
                 // Save the new library path before retiring originals; a DB failure keeps every original in place.
                 if (_games != null)
                 {
@@ -166,8 +167,8 @@ namespace RetroArr.Core.Games
             finally
             {
                 // Only files and directories created for this job are removed, never an input PKG.
-                if (File.Exists(partial)) File.Delete(partial);
-                if (Directory.Exists(work)) Directory.Delete(work, true);
+                RetroArr.Core.IO.FileLog.Delete(partial, "RetroArr's own unfinished PS4 merge");
+                RetroArr.Core.IO.FileLog.Delete(work, "RetroArr's own PS4 merge work folder");
             }
         }
 

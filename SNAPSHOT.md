@@ -17,7 +17,8 @@ This file only says where things are. Update it when a task changes them.
    Downloading → ImportPending → Importing → Imported, or ImportFailed / ImportBlocked / Ignored. A failed
    watch-folder import is tried again after 1 h, up to 3 times, while its source is still there (`RetryFailedWatchFolderImport`).
 3. `PostDownloadProcessor.ProcessCompletedDownloadAsync` unpacks the download and sends it to the platform importers.
-   It retires the source to the trash only once the copy in the library is verified.
+   It retires the source to the trash only once the copy in the library is verified. Nothing is deleted: unpacked
+   archives are set aside in `.retroarr-unpacked` and leave with the download, unwanted files are only skipped.
 4. PlayStation: `PlayStationImporter` (with `PlayStationPackageInspector` and `Ps5PkgReader`).
    - Games go to roms/ps5. Fake PKGs go to roms/ps5/pkg.
    - Updates, DLC and backports go to backport-updates-dlc/{updates,dlc,backport}/<Game>. A PKG under 1 GB is an extra.
@@ -31,6 +32,7 @@ This file only says where things are. Update it when a task changes them.
   `RegroupFlatEntriesAsync` puts back into their folders any entries laid out flat by older versions.
 - `LeftoverCleaner`: every 6 h it moves old work folders, RetroArr's half-written files and `CLEANUP_FOLDERS` to the
   trash. `CLEANUP=dryrun` only writes cleanup-plan.log.
+- `IO/FileLog`: every move, copy, trash, restore, purge and delete goes to files.log and app.log, always.
 - `BiosSorter`: off by default, with a dry run first. It never takes apart folders it did not create.
 
 ## Rules that shape the code

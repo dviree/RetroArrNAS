@@ -54,7 +54,7 @@ namespace RetroArr.Core.IO
                     _logger.Warn($"[FileMover] {failureReason}");
                     return false;
                 }
-                try { File.Delete(destinationFile); }
+                try { FileLog.Delete(destinationFile, $"an old link to {sourceFile}, replaced by the import"); }
                 catch (Exception ex)
                 {
                     failureReason = $"Could not remove link {destinationFile}: {ex.Message}";
@@ -68,6 +68,7 @@ namespace RetroArr.Core.IO
                 if (TryCreateHardLink(sourceFile, destinationFile))
                 {
                     _logger.Info($"[FileMover] Hardlink created: {destinationFile} -> {sourceFile}");
+                    FileLog.Copied(sourceFile, destinationFile, "import (hard link, the source is untouched)");
                     return true;
                 }
                 _logger.Info($"[FileMover] Hardlink returned false. Falling back to copy.");
@@ -84,6 +85,7 @@ namespace RetroArr.Core.IO
                 if (TryReflink(sourceFile, destinationFile))
                 {
                     _logger.Info($"[FileMover] Reflinked (no extra space): {destinationFile} <- {sourceFile}");
+                    FileLog.Copied(sourceFile, destinationFile, "import (reflink, the source is untouched)");
                     return true;
                 }
             }
@@ -96,6 +98,7 @@ namespace RetroArr.Core.IO
             {
                 _logger.Info($"[FileMover] Copying file: {sourceFile} -> {destinationFile}");
                 File.Copy(sourceFile, destinationFile, overwrite: false);
+                FileLog.Copied(sourceFile, destinationFile, "import (copy, the source is untouched)");
                 return true;
             }
             catch (Exception ex)

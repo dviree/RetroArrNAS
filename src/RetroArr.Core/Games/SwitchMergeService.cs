@@ -433,7 +433,7 @@ namespace RetroArr.Core.Games
                 if (File.Exists(target) && !inputs.Any(p => SamePath(p.Path, target))) return $"{Path.GetFileName(target)} is already there";
                 var partial = Path.Combine(folder, ".retroarr-merge-" + Guid.NewGuid().ToString("N")[..8] + ".nsp");
                 File.Copy(mergedFile, partial);
-                if (new FileInfo(partial).Length != size) { File.Delete(partial); return "copy into the library came out short"; }
+                if (new FileInfo(partial).Length != size) { IO.FileLog.Delete(partial, "RetroArr's own copy that came out short"); return "copy into the library came out short"; }
 
                 // The base may carry the published name already (a merge of a merge): it goes to the trash first
                 foreach (var part in inputs.Concat(family.Superseded).Where(p => File.Exists(p.Path)))
@@ -442,10 +442,12 @@ namespace RetroArr.Core.Games
                     if (entry == null && File.Exists(part.Path))
                     {
                         File.Move(partial, target, overwrite: false);
+                        IO.FileLog.Moved(partial, target, "Switch merge published (a part could not go to the trash, both kept)");
                         return $"merged, but {Path.GetFileName(part.Path)} could not go to the trash; both are kept";
                     }
                 }
                 File.Move(partial, target);
+                IO.FileLog.Moved(partial, target, $"Switch merge published from {inputs.Count + family.Superseded.Count} parts (they went to the trash)");
                 await PointLibraryAtAsync(inputs.Concat(family.Superseded).Select(p => p.Path), target);
                 foreach (var root in new[] { library, PartsFolder })
                     RemoveEmptyFolders(inputs.Concat(family.Superseded).Select(p => Path.GetDirectoryName(p.Path)!).Where(d => d.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal)), root);
@@ -454,7 +456,7 @@ namespace RetroArr.Core.Games
             }
             finally
             {
-                try { Directory.Delete(work, true); }
+                try { IO.FileLog.Delete(work, "RetroArr's own Switch merge work folder"); }
                 catch (Exception ex) { _logger.Warn($"[SwitchMerge] Could not remove {work}: {ex.Message}"); }
             }
         }
@@ -609,6 +611,7 @@ namespace RetroArr.Core.Games
             {
                 File.Move(f, t);
             }
+            IO.FileLog.Moved(from, to, "Switch merge: part moved for merging");
         }
 
         private static void RemoveEmptyFolders(IEnumerable<string> folders, string stopAt)
@@ -618,6 +621,7 @@ namespace RetroArr.Core.Games
                 var dir = folder;
                 while (!SamePath(dir, stopAt) && Directory.Exists(dir) && !Directory.EnumerateFileSystemEntries(dir).Any())
                 {
+                    IO.FileLog.Deleted(dir, "empty folder left after a Switch merge");
                     Directory.Delete(dir);
                     dir = Path.GetDirectoryName(dir)!;
                 }

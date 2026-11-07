@@ -288,6 +288,7 @@ namespace RetroArr.Core.Download
                 Directory.CreateDirectory(folder ? to : Path.GetDirectoryName(to)!);
                 var error = folder ? CopyFolder(item, to) : CopyFile(item, to);
                 if (error != null) return (saved, error);
+                IO.FileLog.Copied(item, to, $"backport of {releaseName}");
                 _logger.Info($"[PlayStation] Backport {item} kept in {to}");
                 saved.Add(to);
             }
@@ -371,7 +372,7 @@ namespace RetroArr.Core.Download
             }
             finally
             {
-                try { if (Directory.Exists(work)) Directory.Delete(work, true); }
+                try { IO.FileLog.Delete(work, $"RetroArr's own unpacked copy of {releaseName}, done with (the archives stay)"); }
                 catch (Exception ex) { _logger.Warn($"[PlayStation] Could not remove staging folder {work}: {ex.Message}"); }
             }
         }
@@ -485,9 +486,11 @@ namespace RetroArr.Core.Download
             }
             finally
             {
-                if (Directory.Exists(staging)) Directory.Delete(staging, true);
-                else if (File.Exists(staging)) File.Delete(staging);
+                // Only RetroArr's own half-made copy; the source is never touched here
+                try { IO.FileLog.Delete(staging, "unfinished copy of an import that stopped"); }
+                catch (Exception ex) { _logger.Warn($"[PlayStation] Could not remove the unfinished copy {staging}: {ex.Message}"); }
             }
+            IO.FileLog.Copied(from, target, $"PlayStation import of {releaseName}");
             _logger.Info($"[PlayStation] Imported {from} -> {target}");
 
             foreach (var old in older)

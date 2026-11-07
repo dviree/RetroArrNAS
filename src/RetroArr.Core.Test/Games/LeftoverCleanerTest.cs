@@ -42,8 +42,30 @@ namespace RetroArr.Core.Test.Games
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             File.WriteAllText(path, "x");
-            if (old) File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddDays(-5));
+            if (old)
+            {
+                File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddDays(-5));
+                for (var dir = Path.GetDirectoryName(path); dir != null && dir.Length > _root.Length; dir = Path.GetDirectoryName(dir))
+                    Directory.SetLastWriteTimeUtc(dir, DateTime.UtcNow.AddDays(-5));
+            }
             return path;
+        }
+
+        [Test]
+        public async Task ACopyStillRunning_WithItsFilesOldDates_IsNotOld()
+        {
+            // A copy or an unpack keeps the files' own dates (a game from last month), but its folders are new
+            var copying = Path.Combine(_roms, "ps5", ".retroarr-ps-d7afb0bd", "cache_ps5", "meshes", "head.xmesh");
+            Directory.CreateDirectory(Path.GetDirectoryName(copying)!);
+            File.WriteAllText(copying, "x");
+            File.SetLastWriteTimeUtc(copying, DateTime.UtcNow.AddDays(-30));
+            var unpacked = Path.Combine(_owner, "Ghost of Yotei", "eboot.bin");
+            Directory.CreateDirectory(Path.GetDirectoryName(unpacked)!);
+            File.WriteAllText(unpacked, "x");
+            File.SetLastWriteTimeUtc(unpacked, DateTime.UtcNow.AddDays(-30));
+
+            Assert.That(await _cleaner.RunOnceAsync(), Is.EqualTo(0));
+            Assert.That(File.Exists(copying) && File.Exists(unpacked), Is.True);
         }
 
         [Test]

@@ -43,7 +43,8 @@ namespace RetroArr.Core.Download
             TrashService? trash = null)
         {
             _ai = ai;
-            _trash = trash;
+            // Nothing is deleted: there is always a trash for what an import is done with
+            _trash = trash ?? new TrashService(configService);
             _configService = configService;
             _fileMover = fileMover;
             _gameRepository = gameRepository;
@@ -169,11 +170,9 @@ namespace RetroArr.Core.Download
                             }
                             else
                             {
-                                _logger.Info($"[PostDownload] Extraction successful on attempt {attempt}. Deleting archive: {archivePath}");
-                                foreach (var volume in volumes.Prepend(archivePath))
-                                {
-                                    try { File.Delete(volume); } catch { }
-                                }
+                                // The archive stays beside what came out of it; the source goes to the trash whole after the import
+                                _logger.Info($"[PostDownload] Extraction successful on attempt {attempt}, the archive stays until the source goes to the trash: {archivePath}");
+                                SetAside(path, volumes.Prepend(archivePath));
                             }
                             success = true;
                         }
@@ -234,12 +233,8 @@ namespace RetroArr.Core.Download
                         keep.Add(file);
                         continue;
                     }
-                    try
-                    {
-                        _logger.Info($"[PostDownload] Deleting unwanted file: {file}");
-                        File.Delete(file);
-                    }
-                    catch { }
+                    // Not imported (GetImportFiles leaves it out); it stays in the source, which goes to the trash whole
+                    _logger.Info($"[PostDownload] Unwanted file, not imported: {file}");
                 }
             }
         }
@@ -1522,7 +1517,7 @@ namespace RetroArr.Core.Download
             return path.Length > prefix.Length && path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
         }
 
-        private static void CleanUpSource(string source, bool isDirectory, string importFolder, List<ImportEntry> done, HashSet<string>? keep)
+        private void CleanUpSource(string source, bool isDirectory, string importFolder, List<ImportEntry> done, HashSet<string>? keep)
         {
             if (!isDirectory)
             {
@@ -1656,7 +1651,7 @@ namespace RetroArr.Core.Download
             if (IO.PathGuard.IsCriticalPath(source)) return;
             if (_trash == null)
             {
-                DeleteSource(source, null);
+                _logger.Warn($"[PostDownload] No trash, the source stays: {source}");
                 return;
             }
             try { await _trash.MoveAsync(source, null, title); }
@@ -1769,33 +1764,62 @@ namespace RetroArr.Core.Download
             }
         }
 
-        private static string[] GetImportFiles(string path, HashSet<string>? keep)
+        // Archives already unpacked are set aside in the download, not imported and not deleted
+        internal const string SetAsideFolder = ".retroarr-unpacked";
+
+        private static void SetAside(string path, IEnumerable<string> files)
         {
-            var files = Directory.GetFiles(path, "*.*", SearchOption.AllDirectories);
-            return keep == null ? files : files.Where(f => !keep.Contains(f)).ToArray();
+            var aside = Path.Combine(path, SetAsideFolder);
+            foreach (var file in files)
+            {
+                try
+                {
+                    var to = Path.Combine(aside, Path.GetRelativePath(path, file));
+                    if (File.Exists(to)) continue;
+                    Directory.CreateDirectory(Path.GetDirectoryName(to)!);
+                    File.Move(file, to);
+                    IO.FileLog.Moved(file, to, "unpacked archive set aside; it goes to the trash with its download");
+                }
+                catch (Exception ex) { _logger.Warn($"[PostDownload] Could not set aside {file}: {ex.Message}"); }
+            }
         }
 
-        private static void DeleteSource(string? path, HashSet<string>? keep)
+        private string[] GetImportFiles(string path, HashSet<string>? keep)
+        {
+            var aside = Path.Combine(path, SetAsideFolder) + Path.DirectorySeparatorChar;
+            var files = Directory.GetFiles(path, "*.*", SearchOption.AllDirectories).Where(f => !f.StartsWith(aside, StringComparison.Ordinal)).ToArray();
+            // Deep clean: unwanted files are left out of the import, never deleted
+            var settings = _configService.LoadPostDownloadSettings();
+            var unwanted = settings.EnableDeepClean ? new HashSet<string>(settings.UnwantedExtensions ?? new List<string>(), StringComparer.OrdinalIgnoreCase) : null;
+            return files.Where(f => (keep == null || !keep.Contains(f)) && (unwanted == null || !unwanted.Contains(Path.GetExtension(f)))).ToArray();
+        }
+
+        // Nothing is deleted: a source that is done with goes to RetroArr's trash, whole. Without a trash it stays.
+        private void DeleteSource(string? path, HashSet<string>? keep)
         {
             if (keep != null)
             {
                 _logger.Info($"[PostDownload] Leaving source in place, the torrent client still seeds from it: {path}");
                 return;
             }
-            if (PathGuard.IsCriticalPath(path))
+            if (string.IsNullOrEmpty(path) || PathGuard.IsCriticalPath(path))
             {
-                _logger.Info($"[PostDownload] BLOCKED: Refusing to delete critical path: {path}");
+                _logger.Info($"[PostDownload] BLOCKED: Refusing to remove critical path: {path}");
+                return;
+            }
+            if (_trash == null)
+            {
+                _logger.Warn($"[PostDownload] No trash, the source stays: {path}");
                 return;
             }
             try
             {
-                _logger.Info($"[PostDownload] Cleaning up source: {path}");
-                if (Directory.Exists(path)) Directory.Delete(path, true);
-                else File.Delete(path!);
+                _logger.Info($"[PostDownload] Imported, the source goes to the trash: {path}");
+                _trash.MoveAsync(path, null, Path.GetFileName(Path.TrimEndingDirectorySeparator(path))).GetAwaiter().GetResult();
             }
             catch (Exception ex)
             {
-                _logger.Warn($"[PostDownload] Warning: Could not delete source {path}: {ex.Message}");
+                _logger.Warn($"[PostDownload] Could not move source {path} to the trash, it stays: {ex.Message}");
             }
         }
     }

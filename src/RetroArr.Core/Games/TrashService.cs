@@ -143,6 +143,7 @@ namespace RetroArr.Core.Games
             catch (Exception ex)
             {
                 _logger.Error($"[Trash] Move failed {sourcePath} -> {destPath}: {ex.Message}");
+                RetroArr.Core.IO.FileLog.Failed("TRASH", sourcePath, destPath, ex.Message);
                 // Nothing reached the trash, the source is as it was
                 if (!File.Exists(destPath) && !Directory.Exists(destPath))
                 {
@@ -160,6 +161,7 @@ namespace RetroArr.Core.Games
 
             if (isDir && Flatten) await FlattenAsync(entry, root, sidecarPath);
 
+            RetroArr.Core.IO.FileLog.Trashed(sourcePath, destPath, $"{(gameTitle ?? "no title")}, {entry.SizeBytes} bytes (entry {entryId})");
             _logger.Info($"[Trash] {(isDir ? "Directory" : "File")} moved to trash: {sourcePath} (entry {entryId})");
             return entry;
         }
@@ -199,6 +201,7 @@ namespace RetroArr.Core.Games
                         }
                         Directory.CreateDirectory(Path.GetDirectoryName(to)!);
                         File.Move(from, to);
+                        RetroArr.Core.IO.FileLog.Moved(from, to, $"back into its folder in the trash (entry {entry.Id})");
                     }
                     entry.TrashPath = folder;
                     entry.Files = left.Count == 0 ? null : left;
@@ -346,6 +349,7 @@ namespace RetroArr.Core.Games
                 }
 
                 DropEntry(entry);
+                RetroArr.Core.IO.FileLog.Restored(entry.TrashPath, target, $"put back from the trash (entry {id})");
                 _logger.Info($"[Trash] Restored {id} to {target}");
                 return true;
             }
@@ -359,7 +363,7 @@ namespace RetroArr.Core.Games
         public bool PurgeOne(string id)
         {
             var entry = Get(id);
-            return entry != null && Purge(entry);
+            return entry != null && Purge(entry, "emptied by hand from the trash");
         }
 
         // The entry's description, and for an old entry its folder (now empty of its payload)
@@ -378,7 +382,7 @@ namespace RetroArr.Core.Games
         private static bool SamePath(string? a, string b) =>
             a != null && string.Equals(Path.GetFullPath(a).TrimEnd(Path.DirectorySeparatorChar), Path.GetFullPath(b).TrimEnd(Path.DirectorySeparatorChar), StringComparison.Ordinal);
 
-        private bool Purge(TrashEntry entry)
+        private bool Purge(TrashEntry entry, string why)
         {
             var root = GetTrashRoot();
             var oldDir = Path.Combine(root, entry.Id);
@@ -395,6 +399,7 @@ namespace RetroArr.Core.Games
                         if (File.Exists(Path.Combine(root, file.Name))) File.Delete(Path.Combine(root, file.Name));
                     File.Delete(Path.Combine(root, MetaFolder, entry.Id + ".json"));
                 }
+                RetroArr.Core.IO.FileLog.Purged(entry.TrashPath, $"{why}; it was {entry.OriginalPath}, trashed {entry.DeletedAt:yyyy-MM-dd HH:mm} UTC, {entry.SizeBytes} bytes (entry {entry.Id})");
                 _logger.Info($"[Trash] Purged {entry.Id}");
                 return true;
             }
@@ -413,7 +418,7 @@ namespace RetroArr.Core.Games
             foreach (var entry in List())
             {
                 if (entry.Incomplete) kept++;
-                else if (Purge(entry)) count++;
+                else if (Purge(entry, "the whole trash was emptied by hand")) count++;
             }
             _logger.Info($"[Trash] Emptied: {count} entries{(kept > 0 ? $", kept {kept} whose move did not complete" : "")}");
             return count;
@@ -430,7 +435,7 @@ namespace RetroArr.Core.Games
             foreach (var entry in List())
             {
                 if (entry.DeletedAt > cutoff || entry.Incomplete) continue;
-                if (Purge(entry)) count++;
+                if (Purge(entry, $"older than the trash keeps things ({days} days, Settings > Media > trash retention)")) count++;
             }
             if (count > 0) _logger.Info($"[Trash] Auto-purged {count} entries older than {days}d");
             return count;
