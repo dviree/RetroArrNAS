@@ -50,7 +50,7 @@ namespace RetroArr.Core.Games
 
         private static string Mode => (Environment.GetEnvironmentVariable("CLEANUP") ?? "true").Trim().ToLowerInvariant();
         public static bool Enabled => Mode != "false";
-        private bool DryRun => DryRunOverride ?? (Mode == "dryrun" || IO.FileActions.DryRun);
+        private bool DryRun => DryRunOverride ?? (Mode == "dryrun" || IO.FileActions.DryRunFor(IO.FileActions.Cleanup));
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {

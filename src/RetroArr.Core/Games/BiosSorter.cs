@@ -43,7 +43,7 @@ namespace RetroArr.Core.Games
         }
 
         // BIOS_SORT=dryrun, or FILE_ACTIONS not on: nothing is moved, unpacked or trashed; what would happen goes to files.log
-        internal bool DryRun = string.Equals(Environment.GetEnvironmentVariable("BIOS_SORT"), "dryrun", StringComparison.OrdinalIgnoreCase) || IO.FileActions.DryRun;
+        internal bool DryRun = string.Equals(Environment.GetEnvironmentVariable("BIOS_SORT"), "dryrun", StringComparison.OrdinalIgnoreCase) || IO.FileActions.DryRunFor(IO.FileActions.Bios);
         internal readonly List<string> Plan = new();
 
         // Off unless BIOS_SORT=true: on its first run it took the owner's own folders (86Box, systemroms ...) apart

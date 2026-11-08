@@ -102,20 +102,20 @@ namespace RetroArr.Core.Games
         // Dry run (FILE_ACTIONS is not on): every move, trash and new folder is only written to files.log
         private Task<TrashEntry?> TrashAsync(string path, int? gameId, string? title)
         {
-            if (!IO.FileActions.DryRun) return _trash?.MoveAsync(path, gameId, title) ?? Task.FromResult<TrashEntry?>(null);
+            if (!IO.FileActions.DryRunFor(IO.FileActions.PsNames)) return _trash?.MoveAsync(path, gameId, title) ?? Task.FromResult<TrashEntry?>(null);
             IO.FileLog.Planned("TRASH", path, null, "PlayStation library naming: a copy of " + title);
             return Task.FromResult<TrashEntry?>(null);
         }
 
         private static void MakeDir(string path)
         {
-            if (!IO.FileActions.DryRun) Directory.CreateDirectory(path);
+            if (!IO.FileActions.DryRunFor(IO.FileActions.PsNames)) Directory.CreateDirectory(path);
         }
 
         /// <summary>Renames what needs a name. Returns the renames made, old path to new path (in a dry run, the planned ones).</summary>
         public async Task<List<(string From, string To)>> RunOnceAsync(CancellationToken ct = default)
         {
-            if (!IO.FileActions.DryRun) return await RunCoreAsync(ct);
+            if (!IO.FileActions.DryRunFor(IO.FileActions.PsNames)) return await RunCoreAsync(ct);
             var rename = Rename;
             Rename = (from, to) => IO.FileLog.Planned("MOVE", from, to, "PlayStation library naming");
             try { return await RunCoreAsync(ct); }
@@ -168,7 +168,7 @@ namespace RetroArr.Core.Games
                     catch (Exception ex) { _logger.Warn($"[PSNames] Could not rename {entry}: {ex.Message}"); }
                 }
             }
-            if (done.Count > 0 && !IO.FileActions.DryRun) Remember(done);
+            if (done.Count > 0 && !IO.FileActions.DryRunFor(IO.FileActions.PsNames)) Remember(done);
             return done;
         }
 

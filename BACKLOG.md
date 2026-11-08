@@ -21,6 +21,7 @@ Found bugs, stubs and ideas. Put no personal data here: no owner or host names, 
 - Upgrade trail from 0.28.1 to 0.29.0 (`trail upgrade`, then restart the agent).
 
 ## Done (latest first)
+- FILE_ACTIONS can turn on single jobs (FILE_ACTIONS=psnames: only the PS naming, e.g. the -lz4/-zstd endings).
 - Compressed PS5 game folders always end in -lz4 or -zstd (by content), on import and by the namer.
 - Locked rar/7z: passwords tried as JDownloader does (archive-passwords.txt, ARCHIVE_PASSWORDS, names).
 - Every job that changes files is a dry run until FILE_ACTIONS=on. Plans and real actions all go to files.log.

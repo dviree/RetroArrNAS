@@ -166,7 +166,7 @@ namespace RetroArr.Core.Games
         {
             var target = Switch2Folder;
             if (target == null) return;
-            var dry = IO.FileActions.DryRun;
+            var dry = IO.FileActions.DryRunFor(IO.FileActions.Switch);
             if (!dry) Directory.CreateDirectory(target);
             List<string> files;
             try
@@ -231,7 +231,7 @@ namespace RetroArr.Core.Games
             var state = LoadState();
             var merged = 0;
             ReadTitleId = UsesRust ? RustTitleIdReader(KeysFile, NscbRust) : null;
-            if (IO.FileActions.DryRun)
+            if (IO.FileActions.DryRunFor(IO.FileActions.Switch))
             {
                 // Dry run: only what would be merged is written to files.log; the tidy and the leftovers wait too
                 foreach (var copy in Duplicates.Where(File.Exists)) IO.FileLog.Planned("TRASH", copy, null, "Switch: the same file is in the Switch 2 folder already");

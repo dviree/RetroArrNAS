@@ -191,7 +191,7 @@ namespace RetroArr.Core.Download
                     if (tracked.State == TrackedDownloadState.ImportPending)
                     {
                         // Dry run (FILE_ACTIONS is not on): the import is only written down, once per download
-                        if (IO.FileActions.DryRun)
+                        if (IO.FileActions.DryRunFor(IO.FileActions.Import))
                         {
                             if (_planned.Add(tracked.DownloadClientId + "/" + tracked.DownloadId))
                                 IO.FileLog.Planned("IMPORT", tracked.OutputPath ?? tracked.Title, null,
