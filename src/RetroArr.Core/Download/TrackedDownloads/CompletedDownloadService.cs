@@ -50,7 +50,7 @@ namespace RetroArr.Core.Download.TrackedDownloads
         /// <summary>
         /// Phase 1: Validate the completed download and determine if it's ready for import.
         /// </summary>
-        public async Task CheckAsync(TrackedDownload trackedDownload, DownloadClient clientConfig)
+        public async Task CheckAsync(TrackedDownload trackedDownload, DownloadClient clientConfig, bool byHand = false)
         {
             if (trackedDownload.State != TrackedDownloadState.ImportPending &&
                 trackedDownload.State != TrackedDownloadState.ImportBlocked)
@@ -130,6 +130,18 @@ namespace RetroArr.Core.Download.TrackedDownloads
                     _logger.LogInformation("[CompletedDownload] '{Title}' has no platform - marked as unmapped.", trackedDownload.Title);
                     return;
                 }
+            }
+
+            // A watch folder's rar set: JDownloader unpacks it itself. RetroArr unpacks it only once it has lain
+            // untouched for ArchiveWait and JDownloader has not unpacked it
+            // (an import the owner starts by hand does not wait)
+            if (!byHand && clientConfig.Implementation.Equals(WatchFolderClient.ImplementationName, StringComparison.OrdinalIgnoreCase)
+                && WaitBeforeUnpacking(LocalPath(trackedDownload.OutputPath, clientConfig), clientConfig.Host, DateTime.UtcNow) is { } wait)
+            {
+                trackedDownload.ClearWarnings();
+                trackedDownload.Warn(wait);
+                trackedDownload.State = TrackedDownloadState.ImportBlocked;
+                return;
             }
 
             // Path is valid and platform assigned - ready for import
@@ -291,6 +303,55 @@ namespace RetroArr.Core.Download.TrackedDownloads
             !string.IsNullOrEmpty(path) && (File.Exists(path) || Directory.Exists(path));
 
         // The client's path as seen here, or null when a remote path mapping is set and the path is outside it.
+        /// <summary>How long a rar set waits for JDownloader to unpack it before RetroArr does (ARCHIVE_WAIT_HOURS, default 3).</summary>
+        internal static TimeSpan ArchiveWait => TimeSpan.FromHours(
+            double.TryParse(Environment.GetEnvironmentVariable("ARCHIVE_WAIT_HOURS"), System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var h) && h >= 0 ? h : 3);
+
+        private static readonly System.Text.RegularExpressions.Regex ArchivePart =
+            new(@"\.(rar|7z|zip|r\d\d|\d{3})$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        /// <summary>
+        /// Why a watch folder's download waits instead of being unpacked now, or null. Only a download that is a rar
+        /// (7z, zip) set waits: until it has lain untouched for ArchiveWait, and while JDownloader's own unpacked copy
+        /// (a folder of the same name elsewhere in the watch folder, extracted/ say, with files in it) is there; that
+        /// copy is imported, and then the set is found in the library and goes to the trash unpacked.
+        /// </summary>
+        internal static string? WaitBeforeUnpacking(string? path, string? watchRoot, DateTime now)
+        {
+            if (string.IsNullOrEmpty(path) || !Directory.Exists(path)) return null;
+            List<FileInfo> files;
+            try { files = new DirectoryInfo(path).EnumerateFiles("*", SearchOption.AllDirectories).ToList(); }
+            catch (Exception) { return null; }
+            var archives = files.Where(f => ArchivePart.IsMatch(f.Name)).ToList();
+            // A download that is more than its archives (a game folder with a zip beside it) is not waited for
+            if (archives.Count == 0 || archives.Sum(f => f.Length) < files.Sum(f => f.Length) * 0.9) return null;
+
+            var newest = files.Max(f => f.LastWriteTimeUtc);
+            var until = newest + ArchiveWait;
+            if (now < until)
+                return $"Waiting for JDownloader to unpack it; RetroArr unpacks it itself after {until.ToLocalTime():yyyy-MM-dd HH:mm} if it has not";
+
+            var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(path));
+            if (!string.IsNullOrEmpty(watchRoot) && Directory.Exists(watchRoot))
+            {
+                try
+                {
+                    var unpacked = Directory.EnumerateDirectories(watchRoot, name, new EnumerationOptions
+                        {
+                            RecurseSubdirectories = true, MaxRecursionDepth = 3, IgnoreInaccessible = true,
+                            MatchType = MatchType.Simple, MatchCasing = MatchCasing.CaseInsensitive
+                        })
+                        .Where(d => !string.Equals(Path.GetFullPath(d).TrimEnd('/'), Path.GetFullPath(path).TrimEnd('/'), StringComparison.Ordinal))
+                        .FirstOrDefault(d => Directory.EnumerateFiles(d, "*", SearchOption.AllDirectories).Any(f => new FileInfo(f).Length > 0));
+                    if (unpacked != null)
+                        return $"JDownloader unpacked it to {unpacked}; that copy is imported, this set waits and then goes to the trash";
+                }
+                catch (Exception) { }
+            }
+            return null;
+        }
+
         private static string? LocalPath(string? outputPath, DownloadClient? clientConfig)
         {
             if (clientConfig == null) return null;

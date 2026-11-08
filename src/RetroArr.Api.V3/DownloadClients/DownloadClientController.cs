@@ -393,7 +393,7 @@ namespace RetroArr.Api.V3.DownloadClients
                     tracked.State = TrackedDownloadState.ImportPending;
 
                     // Phase 1: Check (validates path, applies remote mapping, blacklist, unmapped)
-                    await _completedDownloadService.CheckAsync(tracked, config);
+                    await _completedDownloadService.CheckAsync(tracked, config, byHand: true);
 
                     // If Check blocked import, return the reason
                     if (tracked.State == TrackedDownloadState.ImportBlocked)

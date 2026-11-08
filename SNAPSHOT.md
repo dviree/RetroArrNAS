@@ -25,7 +25,8 @@ This file only says where things are. Update it when a task changes them.
    - zstd games go to `PS_ZSTD_LIBRARY`.
    - roms/ps5 alone decides whether a game is already in the library.
    - A compressed game folder ends in -lz4 or -zstd by content (`PlayStationImporter.CompressionSuffix`).
-7. Archives: `IO/ArchiveService` (SharpCompress); a locked rar/7z gets its password from archive-passwords.txt,
+7. A watch folder's rar set waits ARCHIVE_WAIT_HOURS (3) for JDownloader's own unpack (`CompletedDownloadService.WaitBeforeUnpacking`).
+8. Archives: `IO/ArchiveService` (SharpCompress); a locked rar/7z gets its password from archive-passwords.txt,
    ARCHIVE_PASSWORDS or the names (`FindPassword`).
 5. Switch: `Games/SwitchMergeService` makes one file per game in roms/switch. Switch 2 games go flat into roms/switch2.
 6. Platform detection: `Indexers/PlatformDetector`. What a file says inside it, for the AI: `MetadataSource/FileFacts`.
