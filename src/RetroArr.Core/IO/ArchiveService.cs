@@ -59,7 +59,11 @@ namespace RetroArr.Core.IO
             {
                 var stem = System.Text.RegularExpressions.Regex.Replace(name, @"(\.part\d+)?\.(rar|7z|zip)$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                 foreach (System.Text.RegularExpressions.Match tag in System.Text.RegularExpressions.Regex.Matches(stem, @"[\[\(]([^\]\)]+)[\]\)]"))
+                {
+                    // The tag as it stands, brackets and all ("[DLPSGAME.COM]"), then without them
+                    list.Add(tag.Value);
                     list.AddRange(Variants(tag.Groups[1].Value));
+                }
                 foreach (System.Text.RegularExpressions.Match domain in System.Text.RegularExpressions.Regex.Matches(stem, @"(?i)(?:www\.)?[a-z0-9-]+\.(?:com|net|org|to|cc|ru|in|io|me|co|info|xyz)\b"))
                     list.AddRange(Variants(domain.Value));
                 list.Add(stem);
