@@ -23,7 +23,7 @@ namespace RetroArr.Core.Test.IO
                 var candidates = ArchiveService.PasswordCandidates(rar).ToList();
 
                 Assert.That(candidates.Take(2), Is.EqualTo(new[] { "my-own", "second" }), "the owner's list first, as it is");
-                Assert.That(candidates, Is.SupersetOf(new[] { "[DLPSGAME.COM]", "DLPSGAME.COM", "dlpsgame.com", "www.dlpsgame.com", "dlpsgame", "[DLPSGAME.COM]-PPSA26344-DUPLEX", "PPSA26344-DUPLEX" }));
+                Assert.That(candidates, Is.SupersetOf(new[] { "[DLPSGAME.COM]", "DLPSGAME.COM", "dlpsgame.com", "www.dlpsgame.com", "DLPSGAME", "dlpsgame", "[DLPSGAME.COM]-PPSA26344-DUPLEX", "PPSA26344-DUPLEX" }));
                 Assert.That(candidates, Is.Unique);
                 Assert.That(candidates, Has.None.Empty);
             }
