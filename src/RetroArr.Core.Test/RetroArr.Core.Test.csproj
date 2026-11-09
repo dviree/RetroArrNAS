@@ -12,6 +12,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Small real archives (locked RAR5 and 7z) the tests unpack -->
+    <None Include="Fixtures\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\RetroArr.Core\RetroArr.Core.csproj" />
     <ProjectReference Include="..\RetroArr.Api.V3\RetroArr.Api.V3.csproj" />
   </ItemGroup>

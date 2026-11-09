@@ -172,6 +172,11 @@ namespace RetroArr.Core.Download
                     var clientConfig = clients.FirstOrDefault(c => c.Id == tracked.DownloadClientId);
                     if (clientConfig == null) continue;
 
+                    // Dry run: a download whose import is written down already is not checked again on every round
+                    var key = tracked.DownloadClientId + "/" + tracked.DownloadId;
+                    var dryRun = IO.FileActions.DryRunFor(IO.FileActions.Import);
+                    if (dryRun && tracked.State == TrackedDownloadState.ImportPending && _planned.Contains(key)) continue;
+
                     // A watch folder's failed import is tried again later: a file another program held for a moment
                     // ("Source file not found" while a converter worked on it) must not leave the game out for good
                     if (RetryFailedWatchFolderImport(tracked, clientConfig))
@@ -191,9 +196,9 @@ namespace RetroArr.Core.Download
                     if (tracked.State == TrackedDownloadState.ImportPending)
                     {
                         // Dry run (FILE_ACTIONS is not on): the import is only written down, once per download
-                        if (IO.FileActions.DryRunFor(IO.FileActions.Import))
+                        if (dryRun)
                         {
-                            if (_planned.Add(tracked.DownloadClientId + "/" + tracked.DownloadId))
+                            if (_planned.Add(key))
                                 IO.FileLog.Planned("IMPORT", tracked.OutputPath ?? tracked.Title, null,
                                     $"\"{tracked.Title}\" as {tracked.PlatformFolder ?? "unknown platform"} from {clientConfig.Name} ({clientConfig.Implementation})"
                                     + (clientConfig.DeleteSourceAfterImport && clientConfig.Implementation.Equals(WatchFolderClient.ImplementationName, StringComparison.OrdinalIgnoreCase)

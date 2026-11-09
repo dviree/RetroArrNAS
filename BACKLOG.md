@@ -3,15 +3,14 @@
 Found bugs, stubs and ideas. Put no personal data here: no owner or host names, NAS paths, or keys.
 
 ## > RESUME HERE
-- RetroArr now runs as a dry run (FILE_ACTIONS not on). Go through files.log with the owner: the "WOULD ..." lines say
-  what each job would do. Turn on only what the owner approves (FILE_ACTIONS=on in the compose override).
-- The owner reports a PS5 game folder (the PPSA26344 release) vanished. Find out where it went, from the NAS:
-  files.log (new) and app.log in RetroArr's log folder; the trash's .trash-meta sidecars; a find for the title ID.
-  The NAS remote session was disconnected, so this needs the owner to run the commands or reconnect.
-- Check on the NAS that the image with the trash-folders change runs. Its revision label should start with `19ed976`, or be newer.
-- Check that the bin's flat entries went back into their folders. The first cleanup runs 10 min after start.
-- Check that the PS5 game whose import failed (a part01..part08 rar set, plus an extracted copy that failed on a
-  locked file) is now in roms/ps5, and that its release went to the trash.
+- The NAS runs as a dry run (FILE_ACTIONS not set). Go through files.log with the owner: the "WOULD ..." lines say
+  what each job would do. Turn on one job at a time in the compose override (FILE_ACTIONS=psnames first: it only
+  adds -zstd to two folders in roms/ps5).
+- Update the NAS to the newest image and check its revision label against the head of main.
+- The PPSA26344 game: its folder in roms/ps5 was renamed by the namer on Nov 7 and was gone two hours later.
+  RetroArr's logs show no move or delete of it. Still to read, as root on the NAS: a root-owned unpack script and
+  its log beside the library (made the same evening), and RetroArr's real trash (the /trash mount, not config/trash).
+  The rar set was unpacked by hand with unrar into the watch folder's extracted/ ("...-new"); check it finished.
 
 ## Bugs
 - (none open)
@@ -21,6 +20,10 @@ Found bugs, stubs and ideas. Put no personal data here: no owner or host names, 
 - Upgrade trail from 0.28.1 to 0.29.0 (`trail upgrade`, then restart the agent).
 
 ## Done (latest first)
+- Locked archives are now tested for real (RAR5 in volumes with locked headers, data-only, solid, 7z): a solid
+  locked rar never found its password; fixed. Locked headers are proven by listing, so a 100 GB set is told at once.
+- Dry-run leaks in the PS namer closed: no library-list update, empty-folder removal or "Renamed" log line in a dry run.
+- In a dry run a planned import is no longer checked and logged again every minute.
 - A watch folder's rar set waits 3 h for JDownloader to unpack it; RetroArr unpacks it only if JDownloader has not.
 - FILE_ACTIONS can turn on single jobs (FILE_ACTIONS=psnames: only the PS naming, e.g. the -lz4/-zstd endings).
 - Compressed PS5 game folders always end in -lz4 or -zstd (by content), on import and by the namer.

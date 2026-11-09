@@ -107,9 +107,25 @@ namespace RetroArr.Core.Games
             return Task.FromResult<TrashEntry?>(null);
         }
 
+        private static bool Dry => IO.FileActions.DryRunFor(IO.FileActions.PsNames);
+
         private static void MakeDir(string path)
         {
-            if (!IO.FileActions.DryRunFor(IO.FileActions.PsNames)) Directory.CreateDirectory(path);
+            if (!Dry) Directory.CreateDirectory(path);
+        }
+
+        // What was done goes to the log. In a dry run nothing was done, and the plan is in files.log already
+        private static void Did(string message)
+        {
+            if (!Dry) _logger.Info(message);
+        }
+
+        // A folder a move left empty goes. In a dry run nothing was moved, so nothing goes
+        private static void RemoveIfEmpty(string dir)
+        {
+            if (Dry || !Directory.Exists(dir) || Directory.EnumerateFileSystemEntries(dir).Any()) return;
+            IO.FileLog.Deleted(dir, "empty folder left after PlayStation library naming");
+            Directory.Delete(dir);
         }
 
         /// <summary>Renames what needs a name. Returns the renames made, old path to new path (in a dry run, the planned ones).</summary>
@@ -163,7 +179,7 @@ namespace RetroArr.Core.Games
                     {
                         Rename(entry, to);
                         done.Add((entry, to));
-                        _logger.Info($"[PSNames] Renamed {entry} -> {target}");
+                        Did($"[PSNames] Renamed {entry} -> {target}");
                     }
                     catch (Exception ex) { _logger.Warn($"[PSNames] Could not rename {entry}: {ex.Message}"); }
                 }
@@ -204,8 +220,9 @@ namespace RetroArr.Core.Games
                             MakeDir(ZstdLibrary);
                             Rename(game, target);
                             done.Add((game, target));
-                            _logger.Info($"[PSNames] Moved complete ZSTD game {game} -> {target}");
-                            if (rows != null)
+                            Did($"[PSNames] Moved complete ZSTD game {game} -> {target}");
+                            // The library list follows the move only when the game really moved
+                            if (rows != null && !Dry)
                                 foreach (var row in rows.Where(r => Remap(r.Path) != r.Path || Remap(r.ExecutablePath) != r.ExecutablePath))
                                     await _games!.UpdateFieldsAsync(row.Id, g =>
                                     {
@@ -270,7 +287,7 @@ namespace RetroArr.Core.Games
                     MakeDir(Path.GetDirectoryName(to)!);
                     Rename(pkg, to);
                     done.Add((pkg, to));
-                    _logger.Info($"[PSNames] Moved {name} into {Path.GetDirectoryName(to)}");
+                    Did($"[PSNames] Moved {name} into {Path.GetDirectoryName(to)}");
                 }
                 catch (Exception ex) { _logger.Warn($"[PSNames] Could not move {pkg}: {ex.Message}"); }
             }
@@ -360,9 +377,9 @@ namespace RetroArr.Core.Games
                         try { Rename(item, to); done.Add((item, to)); }
                         catch (Exception ex) { _logger.Warn($"[PSNames] Could not move {item}: {ex.Message}"); }
                     }
-                    try { if (!Directory.EnumerateFileSystemEntries(other).Any()) Directory.Delete(other); } catch (Exception) { }
+                    try { RemoveIfEmpty(other); } catch (Exception) { }
                     if (Directory.Exists(other)) _otherCopies.Add(other);
-                    _logger.Info($"[PSNames] Merged {other} into {target}");
+                    Did($"[PSNames] Merged {other} into {target}");
                 }
             }
         }
@@ -435,7 +452,7 @@ namespace RetroArr.Core.Games
                     MakeDir(into);
                     Rename(entry, to);
                     done.Add((entry, to));
-                    _logger.Info($"[PSNames] Sorted {Path.GetFileName(entry)} into {into}");
+                    Did($"[PSNames] Sorted {Path.GetFileName(entry)} into {into}");
                 }
                 catch (Exception ex) { _logger.Warn($"[PSNames] Could not sort {entry}: {ex.Message}"); }
             }
@@ -492,7 +509,7 @@ namespace RetroArr.Core.Games
                         {
                             _logger.Info($"[PSNames] {entry} is a copy of {to}; it went to the trash");
                             var left = Path.GetDirectoryName(entry)!;
-                            if (!string.Equals(left, kind, StringComparison.Ordinal) && !Directory.EnumerateFileSystemEntries(left).Any()) Directory.Delete(left);
+                            if (!string.Equals(left, kind, StringComparison.Ordinal)) RemoveIfEmpty(left);
                         }
                         continue;
                     }
@@ -501,10 +518,10 @@ namespace RetroArr.Core.Games
                         MakeDir(into);
                         Rename(entry, to);
                         done.Add((entry, to));
-                        _logger.Info($"[PSNames] Sorted {name} into {into}");
+                        Did($"[PSNames] Sorted {name} into {into}");
                         // A game folder this left empty goes
                         var from = Path.GetDirectoryName(entry)!;
-                        if (!string.Equals(from, kind, StringComparison.Ordinal) && !Directory.EnumerateFileSystemEntries(from).Any()) Directory.Delete(from);
+                        if (!string.Equals(from, kind, StringComparison.Ordinal)) RemoveIfEmpty(from);
                     }
                     catch (Exception ex) { _logger.Warn($"[PSNames] Could not sort {entry}: {ex.Message}"); }
                 }
@@ -540,14 +557,14 @@ namespace RetroArr.Core.Games
                     Rename(pkg, to);
                     done.Add((pkg, to));
                     left.Add(Path.GetDirectoryName(pkg)!);
-                    _logger.Info($"[PSNames] Moved {Path.GetFileName(pkg)} into {into}");
+                    Did($"[PSNames] Moved {Path.GetFileName(pkg)} into {into}");
                 }
                 catch (Exception ex) { _logger.Warn($"[PSNames] Could not move {pkg}: {ex.Message}"); }
             }
             // A folder this left empty goes, and so do its parents up to pkg ("dlc/<Game> [DLC]")
             foreach (var start in left)
                 for (var dir = start; !string.Equals(dir, pkgFolder, StringComparison.Ordinal) && dir.StartsWith(pkgFolder + Path.DirectorySeparatorChar, StringComparison.Ordinal); dir = Path.GetDirectoryName(dir)!)
-                    try { if (Directory.EnumerateFileSystemEntries(dir).Any()) break; Directory.Delete(dir); } catch (Exception) { break; }
+                    try { if (Dry || Directory.EnumerateFileSystemEntries(dir).Any()) break; RemoveIfEmpty(dir); } catch (Exception) { break; }
         }
 
         // Loose PKGs in roms/ps5 go into roms/ps5/pkg, under the same name
@@ -569,7 +586,7 @@ namespace RetroArr.Core.Games
                     MakeDir(Path.GetDirectoryName(to)!);
                     Rename(pkg, to);
                     done.Add((pkg, to));
-                    _logger.Info($"[PSNames] Moved {pkg} into {Path.GetDirectoryName(to)}");
+                    Did($"[PSNames] Moved {pkg} into {Path.GetDirectoryName(to)}");
                 }
                 catch (Exception ex) { _logger.Warn($"[PSNames] Could not move {pkg}: {ex.Message}"); }
             }

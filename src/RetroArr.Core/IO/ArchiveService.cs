@@ -32,14 +32,15 @@ namespace RetroArr.Core.IO
         /// </summary>
         internal static string? FindPassword(string sourceFile)
         {
+            var headersLocked = false;
             try
             {
                 using var archive = ArchiveFactory.OpenArchive(sourceFile);
                 if (!archive.Entries.Any(e => !e.IsDirectory && e.IsEncrypted)) return null;
             }
-            catch (Exception) { /* the headers are locked too */ }
+            catch (Exception) { headersLocked = true; }
             foreach (var candidate in PasswordCandidates(sourceFile))
-                if (Opens(sourceFile, candidate))
+                if (Opens(sourceFile, candidate, headersLocked))
                 {
                     _logger.Info($"[ArchiveService] Found the password of {Path.GetFileName(sourceFile)}");
                     return candidate;
@@ -87,14 +88,18 @@ namespace RetroArr.Core.IO
             }
         }
 
-        // The password fits when the smallest locked file comes out whole (its checksum is checked at its end)
-        private static bool Opens(string sourceFile, string password)
+        // Locked headers only list their files with the right password, so nothing more is read (a 100 GB set is
+        // told in a second). Else the password fits when a locked file comes out whole (its checksum is checked at
+        // its end): the smallest one, or the first one of a solid archive, which can only be read in order.
+        private static bool Opens(string sourceFile, string password, bool headersLocked)
         {
             try
             {
                 using var archive = ArchiveFactory.OpenArchive(sourceFile, new SharpCompress.Readers.ReaderOptions { Password = password });
-                var entry = archive.Entries.Where(e => !e.IsDirectory).OrderBy(e => e.Size).FirstOrDefault();
-                if (entry == null) return false;
+                var files = archive.Entries.Where(e => !e.IsDirectory).ToList();
+                if (files.Count == 0) return false;
+                if (headersLocked) return true;
+                var entry = archive.IsSolid ? files[0] : files.OrderBy(e => e.Size).First();
                 using var stream = entry.OpenEntryStream();
                 stream.CopyTo(Stream.Null);
                 return true;
@@ -134,7 +139,7 @@ namespace RetroArr.Core.IO
                     var password = FindPassword(sourceFile);
                     if (password == NoPasswordFits)
                     {
-                        _logger.Error($"[ArchiveService] {sourceFile} is password protected and no password fits; add it to {PasswordFile ?? "archive-passwords.txt"} (one per line)");
+                        _logger.Error($"[ArchiveService] {sourceFile} is password protected and no password fits (or it is damaged); add the password to {PasswordFile ?? "archive-passwords.txt"} (one per line)");
                         return false;
                     }
                     using (var archive = ArchiveFactory.OpenArchive(sourceFile, new SharpCompress.Readers.ReaderOptions { Password = password }))
