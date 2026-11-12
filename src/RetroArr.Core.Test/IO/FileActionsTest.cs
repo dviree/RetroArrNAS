@@ -7,8 +7,13 @@ namespace RetroArr.Core.Test.IO
     [TestFixture]
     public class FileActionsTest
     {
-        [TestCase(null, false, false)]
-        [TestCase("", false, false)]
+        [TestCase(null, true, true)]
+        [TestCase("", true, true)]
+        [TestCase("  ", true, true)]
+        [TestCase("off", false, false)]
+        [TestCase("false", false, false)]
+        [TestCase("dryrun", false, false)]
+        [TestCase("on,trash", true, true)]
         [TestCase("on", true, true)]
         [TestCase("psnames", true, false)]
         [TestCase("PSNames, switch", true, false)]
@@ -22,7 +27,8 @@ namespace RetroArr.Core.Test.IO
                 Environment.SetEnvironmentVariable("FILE_ACTIONS", value);
                 Assert.That(FileActions.DryRunFor(FileActions.PsNames), Is.EqualTo(!namesOn));
                 Assert.That(FileActions.DryRunFor(FileActions.Import), Is.EqualTo(!importOn));
-                Assert.That(FileActions.DryRun, Is.EqualTo(value != "on"), "all jobs on only with FILE_ACTIONS=on");
+                Assert.That(FileActions.DryRunFor(FileActions.TrashPurge), Is.EqualTo(value != "on,trash"), "the bin is never auto-emptied merely by enabling file operations");
+                Assert.That(FileActions.DryRun, Is.EqualTo(!(string.IsNullOrWhiteSpace(value) || value.StartsWith("on", StringComparison.OrdinalIgnoreCase))), "general file handling follows the default or explicit on");
             }
             finally
             {

@@ -3,9 +3,8 @@
 Found bugs, stubs and ideas. Put no personal data here: no owner or host names, NAS paths, or keys.
 
 ## > RESUME HERE
-- The NAS runs as a dry run (FILE_ACTIONS not set). Go through files.log with the owner: the "WOULD ..." lines say
-  what each job would do. Turn on one job at a time in the compose override (FILE_ACTIONS=psnames first: it only
-  adds -zstd to two folders in roms/ps5).
+- File handling now runs by default; explicit FILE_ACTIONS=off/dryrun or job lists still apply.
+- Automatic bin emptying requires an explicit FILE_ACTIONS trash entry; on alone never purges it.
 - Update the NAS to the newest image and check its revision label against the head of main.
 - The PPSA26344 game: its folder in roms/ps5 was renamed by the namer on Nov 7 and was gone two hours later.
   RetroArr's logs show no move or delete of it. Still to read, as root on the NAS: a root-owned unpack script and
