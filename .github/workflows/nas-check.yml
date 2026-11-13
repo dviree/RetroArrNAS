@@ -1,0 +1,38 @@
+name: NAS checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: ['codex/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nas-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    if: github.repository == 'dviree/RetroArrNAS'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Backend tests
+        run: dotnet test src/RetroArr.Core.Test/RetroArr.Core.Test.csproj -c Release
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Frontend checks and build
+        run: |
+          npm run test:frontend
+          npm run test:unit
+          npm run build

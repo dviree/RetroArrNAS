@@ -28,6 +28,10 @@ sessions left in `.trail/learnings/`. A session start installs the `trail` comma
 - Before a push: `trail check` (the diff against the learnings), then the whole test suite.
 - When a session works something out or the owner corrects how something is done, save it: `trail note`.
 
+## Upstream integration
+
+- v1.0.239: keep the watch-folder platform correction before failed-grab bookkeeping in `TrackDownload`.
+
 ## Before every push
 
 All of it with trail, in this order:

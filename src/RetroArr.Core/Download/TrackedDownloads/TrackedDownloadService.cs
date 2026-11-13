@@ -56,10 +56,33 @@ namespace RetroArr.Core.Download.TrackedDownloads
                 if (!string.IsNullOrEmpty(downloadItem.ImportSubfolder) && string.IsNullOrEmpty(existing.ImportSubfolder))
                     existing.ImportSubfolder = downloadItem.ImportSubfolder;
 
+                // Retried or resumed in the client after it failed: it is downloading again. Deleted or an unknown
+                // status is no retry.
+                if (existing.State == TrackedDownloadState.DownloadFailed && IsWorking(downloadItem.State))
+                {
+                    existing.State = TrackedDownloadState.Downloading;
+                    existing.ClearWarnings();
+                    Save();
+                }
+                // Still failed, with a newer reason from the client
+                else if (existing.State == TrackedDownloadState.DownloadFailed && downloadItem.State == DownloadState.Error
+                         && !string.IsNullOrWhiteSpace(existing.ClientMessage) && existing.ClientMessage != existing.StatusMessages.FirstOrDefault())
+                {
+                    MarkDownloadFailed(existing, downloadItem);
+                    Save();
+                }
+
                 // If download client reports completed and we're still in Downloading, advance to ImportPending
                 if (downloadItem.State == DownloadState.Completed && existing.State == TrackedDownloadState.Downloading)
                 {
                     existing.State = TrackedDownloadState.ImportPending;
+                }
+
+                // A failed job stays in the client's history (SABnzbd, NZBGet), so it would read Downloading for good
+                if (downloadItem.State == DownloadState.Error && existing.State == TrackedDownloadState.Downloading)
+                {
+                    MarkDownloadFailed(existing, downloadItem);
+                    Save();
                 }
 
                 return existing;
@@ -84,10 +107,24 @@ namespace RetroArr.Core.Download.TrackedDownloads
                     : TrackedDownloadState.Downloading,
                 Added = DateTime.UtcNow
             };
+            if (downloadItem.State == DownloadState.Error)
+                MarkDownloadFailed(tracked, downloadItem);
 
             _cache.TryAdd((clientId, downloadItem.Id), tracked);
             Save();
             return tracked;
+        }
+
+        // The client works on the download
+        private static bool IsWorking(DownloadState state) => state is DownloadState.Downloading
+            or DownloadState.Queued or DownloadState.Paused or DownloadState.Checking or DownloadState.Completed;
+
+        // With the client's own reason where it gives one, such as SABnzbd's fail_message
+        private static void MarkDownloadFailed(TrackedDownload tracked, DownloadStatus downloadItem)
+        {
+            var reason = downloadItem.StatusMessages.FirstOrDefault() ?? "The download client reports this download as failed.";
+            tracked.MarkDownloadFailed(reason);
+            _logger.Info($"[TrackedDownload] '{tracked.Title}' failed in {tracked.DownloadClientName}: {reason}");
         }
 
         // Tracks a download with what the grabs know of it by its name: platform, game and import subfolder, each where
@@ -100,7 +137,12 @@ namespace RetroArr.Core.Download.TrackedDownloads
             download.PlatformFolder = grabbed ?? download.PlatformFolder;
             download.GameId = grabs.LookupGameId(download.Name);
             download.ImportSubfolder = grabs.LookupImportSubfolder(download.Name);
+            var before = Find(clientId, download.Id);
+            var failedBefore = before?.State == TrackedDownloadState.DownloadFailed;
             var tracked = TrackDownload(download, clientId, clientName);
+            // The id may now belong to another job
+            var trackedBefore = ReferenceEquals(before, tracked);
+            failedBefore &= trackedBefore;
             if (!string.IsNullOrEmpty(download.PlatformFolder) && string.IsNullOrEmpty(tracked.PlatformFolder))
                 tracked.PlatformFolder = download.PlatformFolder;
             // The client reads the files and now says another platform than an older run stored (a .nup read as nothing
@@ -117,6 +159,30 @@ namespace RetroArr.Core.Download.TrackedDownloads
                     tracked.StatusMessages.Clear();
                 }
                 Save();
+            }
+            // A failed grab no longer holds back the monitor's next search for the game, and is not sent again by it.
+            // A retry the client runs as a new job holds it back again.
+            var failedNow = tracked.State == TrackedDownloadState.DownloadFailed;
+            if (failedNow)
+            {
+                // Marked when it fails and checked again only once a grab was stored since, which may be this very job (a
+                // torrent sent again, a game mapped by hand). A live job of the same game, or of the same name when the
+                // game is unknown (a retry under a new id, a second grab), holds the mark back.
+                var stored = grabs.EntriesAdded;
+                if (tracked.GrabMarkedAt != stored && !_cache.Values.Any(t => !ReferenceEquals(t, tracked)
+                        && (tracked.GameId > 0 ? t.GameId == tracked.GameId : string.Equals(t.Title, tracked.Title, StringComparison.OrdinalIgnoreCase))
+                        && t.State is TrackedDownloadState.Downloading or TrackedDownloadState.ImportPending
+                            or TrackedDownloadState.ImportBlocked or TrackedDownloadState.Importing))
+                {
+                    grabs.MarkFailed(download.Name, tracked.GameId);
+                    tracked.GrabMarkedAt = stored;
+                }
+            }
+            else
+            {
+                tracked.GrabMarkedAt = null;
+                if (failedBefore || (!trackedBefore && IsWorking(download.State)))
+                    grabs.ClearFailed(download.Name, tracked.GameId);
             }
             return tracked;
         }
@@ -156,8 +222,8 @@ namespace RetroArr.Core.Download.TrackedDownloads
                     continue;
                 }
 
-                // Downloading but client no longer reports it: gone (deleted or auto-cleaned)
-                if (tracked.State == TrackedDownloadState.Downloading)
+                // Downloading or failed but client no longer reports it: gone (deleted or auto-cleaned)
+                if (tracked.State == TrackedDownloadState.Downloading || tracked.State == TrackedDownloadState.DownloadFailed)
                 {
                     _logger.Info($"[TrackedDownload] Removing stale entry '{tracked.Title}' - no longer in client queue.");
                     _cache.TryRemove(Key(tracked), out _);

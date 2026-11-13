@@ -19,6 +19,7 @@ Found bugs, stubs and ideas. Put no personal data here: no owner or host names, 
 - Upgrade trail from 0.28.1 to 0.29.0 (`trail upgrade`, then restart the agent).
 
 ## Done (latest first)
+- Upstream v1.0.239: failed downloads are tracked, dead grabs are suppressed for 7 days, and client retries clear failures.
 - Locked archives are now tested for real (RAR5 in volumes with locked headers, data-only, solid, 7z): a solid
   locked rar never found its password; fixed. Locked headers are proven by listing, so a 100 GB set is told at once.
 - Dry-run leaks in the PS namer closed: no library-list update, empty-folder removal or "Renamed" log line in a dry run.
