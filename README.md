@@ -3,19 +3,54 @@
 </p>
 
 <p align="center">
-  <strong>Self-hosted game library manager for PC and retro consoles.</strong>
+  <strong>RetroArrNAS — a self-hosted game library manager for your NAS.</strong>
 </p>
 
 <p align="center">
   <a href="https://RetroArr.app"><img src="https://img.shields.io/badge/Website-RetroArr.app-6366f1?style=flat-square" alt="Website" /></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" alt="License" /></a>
-  <a href="https://github.com/RiDDiX/RetroArr/pkgs/container/retroarr"><img src="https://img.shields.io/badge/Docker-amd64%20%2F%20arm64-2496ed?style=flat-square&logo=docker&logoColor=white" alt="Docker" /></a>
-  <a href="https://github.com/RiDDiX/RetroArr/releases"><img src="https://img.shields.io/badge/Downloads-Releases-green?style=flat-square&logo=github" alt="Releases" /></a>
+  <a href="https://github.com/dviree/RetroArrNAS/pkgs/container/retroarrnas"><img src="https://img.shields.io/badge/Docker-linux%2Famd64-2496ed?style=flat-square&logo=docker&logoColor=white" alt="RetroArrNAS Docker image for Linux amd64" /></a>
+  <a href="https://github.com/dviree/RetroArrNAS/actions/workflows/nas-image.yml"><img src="https://github.com/dviree/RetroArrNAS/actions/workflows/nas-image.yml/badge.svg" alt="NAS image build" /></a>
 </p>
 
 ---
 
-Think Radarr/Sonarr, but for video games. RetroArr scans your library, fetches metadata, organizes files, searches indexers, and automates downloads across PC, retro consoles, handhelds, and arcade platforms. One tool, one UI.
+Think Radarr/Sonarr, but for video games. Browse your collection with cover art, fetch metadata, search indexers and follow downloads in one web interface. RetroArrNAS extends [RetroArr](https://github.com/RiDDiX/RetroArr) with NAS import workflows, PlayStation and Switch organization, and recoverable file handling.
+
+[Interface preview](#interface-preview) · [NAS features](#nas-edition-this-fork) · [Quick start](#quick-start) · [All features](#features)
+
+## Interface preview
+
+### Game library
+
+Browse cover art, filter by platform, switch between grid and list views, and scan or refresh metadata from the library.
+
+[![RetroArr game library showing PSP covers, platform filters and scanning controls](docs/screenshots/library.png)](docs/screenshots/library.png)
+
+<details>
+<summary><strong>More screenshots: dashboard, game details and download queue</strong></summary>
+
+### Dashboard
+
+Collection totals, recently added games and genre breakdowns in one overview.
+
+[![Dashboard with collection totals, recently added games and top genres](docs/screenshots/dashboard.png)](docs/screenshots/dashboard.png)
+
+### Game details
+
+Cover art, description, platform and rating, with controls for searching, files, local media, installation and export.
+
+[![Game details showing artwork, metadata and file management controls](docs/screenshots/game-details.png)](docs/screenshots/game-details.png)
+
+### Download queue
+
+Queue, history, failed downloads, unmapped items and blacklist in one place.
+
+[![Downloads interface with queue, history, failed and unmapped tabs](docs/screenshots/status.png)](docs/screenshots/status.png)
+
+</details>
+
+*These are the interface screenshots included in this repository. They illustrate the shared RetroArr interface; the running version and theme may differ. Click any image to view it at full size.*
 
 ## NAS edition (this fork)
 
@@ -76,7 +111,7 @@ This fork adds what a download-and-sort pipeline on a NAS needs, so no scripts r
 | `SWITCH_WORK` | `/temp/retroarr-switch` | Work folder for merges |
 | `BIOS_SORT`, `BIOS_SORT_FOLDER` | off, `/nas/games/bios` | `dryrun` or `true` |
 
-The image is built by `.github/workflows/nas-image.yml`, which also merges upstream changes, and is meant to be pulled by Watchtower.
+The image is built by [the NAS image workflow](https://github.com/dviree/RetroArrNAS/actions/workflows/nas-image.yml), which also merges upstream changes. Update an existing installation with `docker compose pull` followed by `docker compose up -d`.
 
 ## Quick Start
 
@@ -84,7 +119,7 @@ The image is built by `.github/workflows/nas-image.yml`, which also merges upstr
 # docker-compose.yml
 services:
   retroarr:
-    image: ghcr.io/riddix/retroarr:latest
+    image: ghcr.io/dviree/retroarrnas:latest
     container_name: retroarr
     ports:
       - "2727:2727"      # HTTP
@@ -183,7 +218,7 @@ See [Quick Start](#quick-start). HTTP on **2727**, optional HTTPS on **2728**.
 ```yaml
 services:
   RetroArr:
-    image: ghcr.io/riddix/retroarr:latest
+    image: ghcr.io/dviree/retroarrnas:latest
     container_name: RetroArr
     network_mode: bridge
     ports:
@@ -219,7 +254,7 @@ x-casaos:
 <details>
 <summary><strong>Unraid</strong></summary>
 
-Community Applications template: [`_unraid/retroarr.xml`](_unraid/retroarr.xml). Or add the container by hand with image `ghcr.io/riddix/retroarr:latest` and both ports mapped (2727 + 2728).
+Community Applications template: [`_unraid/retroarr.xml`](_unraid/retroarr.xml). Or add the container by hand with image `ghcr.io/dviree/retroarrnas:latest` and both ports mapped (2727 + 2728).
 
 </details>
 
