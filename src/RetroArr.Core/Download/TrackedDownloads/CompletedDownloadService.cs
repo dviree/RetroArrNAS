@@ -308,6 +308,9 @@ namespace RetroArr.Core.Download.TrackedDownloads
             double.TryParse(Environment.GetEnvironmentVariable("ARCHIVE_WAIT_HOURS"), System.Globalization.NumberStyles.Float,
                 System.Globalization.CultureInfo.InvariantCulture, out var h) && h >= 0 ? h : 3);
 
+        private static readonly System.Text.RegularExpressions.Regex FirstVolume =
+            new(@"\.part(\d+)\.rar$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
         private static readonly System.Text.RegularExpressions.Regex ArchivePart =
             new(@"\.(rar|7z|zip|r\d\d|\d{3})$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
@@ -324,8 +327,17 @@ namespace RetroArr.Core.Download.TrackedDownloads
             try { files = new DirectoryInfo(path).EnumerateFiles("*", SearchOption.AllDirectories).ToList(); }
             catch (Exception) { return null; }
             var archives = files.Where(f => ArchivePart.IsMatch(f.Name)).ToList();
+            if (archives.Count == 0) return null;
+
+            // A set whose first volume is gone is being unpacked: JDownloader removes each part once it is through it
+            // (part01..part05 gone, part06..part11 left), often unpacking into the same folder. Nothing can be unpacked
+            // from it, and what is beside it is half done, so the download waits until the parts are all gone.
+            var numbered = archives.Select(f => FirstVolume.Match(f.Name)).Where(m => m.Success).ToList();
+            if (numbered.Count > 0 && !numbered.Any(m => m.Groups[1].Value.TrimStart('0') == "1"))
+                return "JDownloader is unpacking it (its first parts are gone already); it is imported once the unpack is done";
+
             // A download that is more than its archives (a game folder with a zip beside it) is not waited for
-            if (archives.Count == 0 || archives.Sum(f => f.Length) < files.Sum(f => f.Length) * 0.9) return null;
+            if (archives.Sum(f => f.Length) < files.Sum(f => f.Length) * 0.9) return null;
 
             var newest = files.Max(f => f.LastWriteTimeUtc);
             var until = newest + ArchiveWait;

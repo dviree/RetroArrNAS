@@ -233,6 +233,28 @@ namespace RetroArr.Core.Download
             dir.EnumerateFileSystemInfos().Where(e => !e.Name.StartsWith('.')
                 && !(e is DirectoryInfo d && File.Exists(Path.Combine(d.FullName, IgnoreMarker))));
 
+        /// <summary>
+        /// When the download last changed: its newest file, or its newest folder. An unpack (JDownloader, unrar) gives
+        /// each file the date it has in the archive, often weeks old, but the folders it creates and fills are new; so
+        /// a game still being unpacked is never taken for a finished one.
+        /// </summary>
+        internal static DateTime NewestChange(FileSystemInfo entry, List<FileInfo> files)
+        {
+            var newest = files.Count > 0 ? files.Max(f => f.LastWriteTimeUtc) : DateTime.MinValue;
+            if (entry is DirectoryInfo dir)
+            {
+                try
+                {
+                    newest = new[] { newest, dir.LastWriteTimeUtc }
+                        .Concat(dir.EnumerateDirectories("*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true })
+                            .Take(20000).Select(d => d.LastWriteTimeUtc))
+                        .Max();
+                }
+                catch (Exception) { }
+            }
+            return newest;
+        }
+
         private DownloadStatus? Describe(FileSystemInfo entry)
         {
             var files = entry is DirectoryInfo dir
@@ -246,7 +268,7 @@ namespace RetroArr.Core.Download
             if (PlayStationImporter.IsPlayStation(platform))
                 return DescribePlayStation(entry, files, platform!);
 
-            var newest = files.Max(f => f.LastWriteTimeUtc);
+            var newest = NewestChange(entry, files);
             var settled = DateTime.UtcNow - newest >= SettleTime
                 && !files.Any(f => PartialExtensions.Contains(f.Extension, StringComparer.OrdinalIgnoreCase));
 
@@ -288,7 +310,7 @@ namespace RetroArr.Core.Download
                     "left for the converter (PS_IMPORT_FOLDERS=false)",
                 _ => null
             };
-            var settled = DateTime.UtcNow - files.Max(f => f.LastWriteTimeUtc) >= PlayStationSettleTime
+            var settled = DateTime.UtcNow - NewestChange(entry, files) >= PlayStationSettleTime
                 && !files.Any(f => PartialExtensions.Contains(f.Extension, StringComparer.OrdinalIgnoreCase))
                 && !File.Exists(PlayStationHoldFile);
             return new DownloadStatus

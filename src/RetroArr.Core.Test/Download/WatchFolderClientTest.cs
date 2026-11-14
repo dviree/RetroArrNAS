@@ -40,7 +40,13 @@ namespace RetroArr.Core.Test.Download
             var path = Path.Combine(_root, relative);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             File.WriteAllText(path, content);
-            if (old) File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddHours(-1));
+            if (old)
+            {
+                File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddHours(-1));
+                // The folders too: a folder written to lately means its download is still coming in
+                for (var dir = Path.GetDirectoryName(path); dir != null && dir.Length > _root.Length; dir = Path.GetDirectoryName(dir))
+                    Directory.SetLastWriteTimeUtc(dir, DateTime.UtcNow.AddHours(-1));
+            }
             return path;
         }
 
