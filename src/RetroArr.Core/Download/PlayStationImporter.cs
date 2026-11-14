@@ -444,16 +444,15 @@ namespace RetroArr.Core.Download
             var name = BuildName(title, package, extension) + (isFolderGame ? CompressionSuffix(from, package.Format) : string.Empty);
             var target = Path.Combine(folder, name);
 
-            // The game in any form (PKG, LZ4 folder, uncompressed folder, image) in this or a newer version, or in a
-            // version that can't be told, means it is already there: nothing is added. Only an older version in the
-            // same format is replaced, and never an LZ4 folder; those are the owner's to manage.
+            // One copy of each type may sit side by side: a PKG, an uncompressed folder, an LZ4 folder, a zstd folder and
+            // an image are different things. The same type in this or a newer version, or in a version that can't be
+            // told, means it is already there: nothing is added. Only an older version of the same type is replaced,
+            // and never a compressed folder; those are the owner's to manage.
             var older = new List<string>();
-            // PKGs are kept on their own: a PKG is added even when the game is there as an LZ4 folder, a folder or an
-            // image, and those never stop or replace a PKG
-            var isPkg = package.Format == PlayStationFormat.Pkg;
+            var type = TypeOf(from, package.Format);
             // A PS4 PKG still loose in roms/ps4 (not moved into its game's folder yet) counts too
             var candidates = ps4Pkg ? SameGame(folder, package, name).Concat(SameGame(platformPath, package, name)) : SameGame(folder, package, name);
-            foreach (var existing in candidates.Where(e => (KindOf(e) == PlayStationFormat.Pkg) == isPkg))
+            foreach (var existing in candidates.Where(e => TypeOf(e) == type))
             {
                 var kind = KindOf(existing);
                 if (kind == package.Format && SizeOf(existing) == SizeOf(from))
@@ -472,7 +471,7 @@ namespace RetroArr.Core.Download
             // Folders one level down (roms/ps5/pkg, roms/ps5/_extracted) are only looked at, never changed
             // The separate zstd library is intentionally filled even when another format is present.
             var elsewhere = (zstd ? Enumerable.Empty<string>() : InOtherLibraries(package, platformPath))
-                .FirstOrDefault(e => !older.Contains(e) && (KindOf(e) == PlayStationFormat.Pkg) == isPkg && !IsOlder(e, package.Version));
+                .FirstOrDefault(e => !older.Contains(e) && TypeOf(e) == type && !IsOlder(e, package.Version));
             if (elsewhere != null)
             {
                 _logger.Info($"[PlayStation] {releaseName} is already in {elsewhere}, not added");
@@ -631,15 +630,38 @@ namespace RetroArr.Core.Download
         /// </summary>
         internal static string? AlreadyThere(string folder, PlayStationPackage package, string releaseName)
         {
-            // An LZ4 folder, an uncompressed folder or an image counts for each other; a PKG only for a PKG. What the
-            // archive holds has to be known from its table of contents
+            // Only a copy of the same type counts (a PKG for a PKG, a folder for a folder). What the archive holds has to
+            // be known from its table of contents; a compressed folder in it may be LZ4 or zstd, so either counts
             if (package.TitleId == null || package.Content != PlayStationContent.Game || package.Inside == PlayStationFormat.Unknown) return null;
-            var isPkg = package.Inside == PlayStationFormat.Pkg;
             var version = package.Version ?? VersionInName(releaseName);
             var here = Directory.Exists(folder) ? SameGame(folder, package, string.Empty) : Enumerable.Empty<string>();
             return here.Concat(InOtherLibraries(package, Directory.Exists(folder) ? folder : null))
-                .FirstOrDefault(e => (KindOf(e) == PlayStationFormat.Pkg) == isPkg && !IsOlder(e, version));
+                .FirstOrDefault(e => SameTypeAsInside(TypeOf(e), package.Inside) && !IsOlder(e, version));
         }
+
+        /// <summary>The kinds of copy that may each sit once in the library, side by side.</summary>
+        internal enum CopyType { Unknown, Pkg, Folder, Lz4, Zstd, Exfat, Ffpfsc }
+
+        /// <summary>A library entry's copy type: by its extension, and for a folder by its name and files (zstd, LZ4, plain).</summary>
+        internal static CopyType TypeOf(string path) => TypeOf(path, KindOf(path));
+
+        internal static CopyType TypeOf(string path, PlayStationFormat format) => format switch
+        {
+            PlayStationFormat.Pkg => CopyType.Pkg,
+            PlayStationFormat.ExfatImage => CopyType.Exfat,
+            PlayStationFormat.FfpfscImage => CopyType.Ffpfsc,
+            PlayStationFormat.Folder or PlayStationFormat.Lz4Folder when IsZstd(path)
+                || Regex.IsMatch(Path.GetFileName(Path.TrimEndingDirectorySeparator(path)), @"(?i)[-_ \[]zstd\]?$") => CopyType.Zstd,
+            PlayStationFormat.Lz4Folder => CopyType.Lz4,
+            PlayStationFormat.Folder => CopyType.Folder,
+            _ => CopyType.Unknown
+        };
+
+        private static bool SameTypeAsInside(CopyType existing, PlayStationFormat inside) => inside switch
+        {
+            PlayStationFormat.Lz4Folder => existing is CopyType.Lz4 or CopyType.Zstd,
+            _ => existing == TypeOf(string.Empty, inside)
+        };
 
         // Older only when both versions are known and the entry's is lower
         private static bool IsOlder(string entry, string? version)

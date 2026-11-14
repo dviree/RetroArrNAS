@@ -19,6 +19,7 @@ Found bugs, stubs and ideas. Put no personal data here: no owner or host names, 
 - Upgrade trail from 0.28.1 to 0.29.0 (`trail upgrade`, then restart the agent).
 
 ## Done (latest first)
+- roms/ps5 may hold one copy of a game per type (PKG, folder, LZ4, zstd, image); only the same type blocks an import.
 - A watch-folder download still being unpacked is no longer taken for finished: folder dates count, not only file
   dates (an unpack gives files their archive dates). A rar set whose first parts are gone (JDownloader removes each
   part once through it) waits instead of failing with "no first volume found".

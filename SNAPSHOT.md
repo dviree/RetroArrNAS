@@ -27,7 +27,8 @@ This file only says where things are. Update it when a task changes them.
    - Games go to roms/ps5. Fake PKGs go to roms/ps5/pkg.
    - Updates, DLC and backports go to backport-updates-dlc/{updates,dlc,backport}/<Game>. A PKG under 1 GB is an extra.
    - zstd games go to `PS_ZSTD_LIBRARY`.
-   - roms/ps5 alone decides whether a game is already in the library.
+   - roms/ps5 alone decides whether a game is already in the library, one copy per type (PKG, folder, LZ4, zstd,
+     .exfat, .ffpfsc) side by side (`PlayStationImporter.TypeOf`).
    - A compressed game folder ends in -lz4 or -zstd by content (`PlayStationImporter.CompressionSuffix`).
 7. A watch folder's rar set waits ARCHIVE_WAIT_HOURS (3) for JDownloader's own unpack (`CompletedDownloadService.WaitBeforeUnpacking`).
 8. Archives: `IO/ArchiveService` (SharpCompress); a locked rar/7z gets its password from archive-passwords.txt,

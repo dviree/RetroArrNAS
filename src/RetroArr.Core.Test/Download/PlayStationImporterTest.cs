@@ -342,7 +342,7 @@ namespace RetroArr.Core.Test.Download
         }
 
         [Test]
-        public async Task AGameInAnyForm_IsAlreadyThere_AndNothingIsReplacedAcrossForms()
+        public async Task CopiesOfOtherTypes_SitSideBySide_AndNothingIsReplacedAcrossTypes()
         {
             Directory.CreateDirectory(Ps5);
             var lz4 = Directory.CreateDirectory(Path.Combine(Ps5, "Onimusha [PPSA01903]-lz4")).FullName;
@@ -352,18 +352,41 @@ namespace RetroArr.Core.Test.Download
             var result = await Import(Image("ff7r.exfat", "02.000.000"));
 
             Assert.That(result.Success, Is.True, result.Reason);
+            Assert.That(result.AlreadyInLibrary, Is.False, "an image is another type than a PKG or an LZ4 folder");
             Assert.That(File.Exists(pkg) && Directory.Exists(lz4), Is.True, "nothing is put in the trash");
-            Assert.That(Directory.GetFiles(Ps5), Has.Length.EqualTo(1), "a game that is there in some form is not added again");
+            Assert.That(Directory.GetFiles(Ps5, "*.exfat"), Has.Length.EqualTo(1), "the image is added beside them");
         }
 
         [Test]
-        public async Task AnLz4FolderInTheLibrary_MakesTheReleaseAlreadyThere_SoItCanGo()
+        public async Task ACopyOfTheSameType_InTheSameVersion_IsAlreadyThere()
+        {
+            Directory.CreateDirectory(Ps5);
+            File.WriteAllText(Path.Combine(Ps5, "FINAL FANTASY VII REMAKE [PPSA01903] [v1.10].exfat"), "already here");
+
+            var result = await Import(Image("ff7r.exfat"));
+
+            Assert.That(result.Success, Is.True, result.Reason);
+            Assert.That(Directory.GetFiles(Ps5), Has.Length.EqualTo(1), "the same type is not added twice");
+        }
+
+        [TestCase("Game [PPSA01903] [v1.0]-zstd", "ampr_zstd-000.pak", ExpectedResult = "Zstd")]
+        [TestCase("Game [PPSA01903] [v1.0]-lz4", "ampr_assets_0001.bin", ExpectedResult = "Lz4")]
+        [TestCase("Game [PPSA01903] [v1.0]", "eboot.bin", ExpectedResult = "Folder")]
+        public string AFoldersType_IsToldByItsFiles(string name, string file)
+        {
+            var folder = Directory.CreateDirectory(Path.Combine(Ps5, name)).FullName;
+            File.WriteAllText(Path.Combine(folder, file), "x");
+            return PlayStationImporter.TypeOf(folder).ToString();
+        }
+
+        [Test]
+        public async Task AnLz4FolderInTheLibrary_DoesNotStopAnImage_OfTheSameGame()
         {
             Directory.CreateDirectory(Path.Combine(Ps5, "Onimusha [PPSA01903]-lz4"));
             var result = await Import(Image("ff7r.exfat"));
             Assert.That(result.Success, Is.True, result.Reason);
-            Assert.That(result.AlreadyInLibrary, Is.True);
-            Assert.That(Directory.GetFiles(Ps5), Is.Empty);
+            Assert.That(result.AlreadyInLibrary, Is.False);
+            Assert.That(Directory.GetFiles(Ps5, "*.exfat"), Has.Length.EqualTo(1));
         }
 
         [Test]
@@ -419,7 +442,7 @@ namespace RetroArr.Core.Test.Download
         }
 
         [Test]
-        public async Task SameVersionInAnotherFormat_IsAlreadyThere()
+        public async Task SameVersionInAnotherFormat_IsAddedBesideIt()
         {
             Directory.CreateDirectory(Ps5);
             File.WriteAllText(Path.Combine(Ps5, "FINAL FANTASY VII REMAKE [PPSA01903] [v1.10].ffpfsc"), "lz4");
@@ -427,7 +450,7 @@ namespace RetroArr.Core.Test.Download
             var result = await Import(Image("ff7r.exfat"));
 
             Assert.That(result.Success, Is.True, result.Reason);
-            Assert.That(Directory.GetFiles(Ps5), Has.Length.EqualTo(1));
+            Assert.That(Directory.GetFiles(Ps5), Has.Length.EqualTo(2), "an .exfat and an .ffpfsc are two types");
         }
 
         [TestCase("[DLPSGAME.COM]-BP-10.xx-PPSA26344-app0_Pro.zip", true)]

@@ -201,8 +201,8 @@ namespace RetroArr.Core.Test.Download
         [TestCase("lz4", true)]
         [TestCase("zstd", false)]
         [TestCase("zstd", true)]
-        // roms/ps5 decides: a game there in any form (an LZ4 folder too) is in the library, and a copy only in the
-        // zstd library is not; either way the verified JDownloader release goes to the trash
+        // roms/ps5 decides, one copy per type: an image is imported beside an LZ4 folder of the same game, and a copy
+        // only in the zstd library does not count; either way the verified JDownloader release goes to the trash
         public async Task WatchFolder_Ps5Download_RomsPs5Decides_AndTheReleaseGoesToTheTrash(string format, bool archived)
         {
             var config = new ConfigurationService(_root);
@@ -241,10 +241,10 @@ namespace RetroArr.Core.Test.Download
                 Assert.That(File.Exists(source), Is.False, "the release goes to the trash");
                 Assert.That(Directory.EnumerateFiles(trash, "*", SearchOption.AllDirectories).Any(), Is.True, "nothing deleted, it is in the trash");
                 Assert.That(File.ReadAllText(existingGame), Is.EqualTo("compressed game"), "the compressed copy is untouched");
-                if (format == "zstd")
-                    Assert.That(result.DestinationPath, Does.StartWith(Path.Combine(library, "ps5")).And.Matches<string>(File.Exists), "imported into roms/ps5: the zstd library does not count");
-                else
-                    Assert.That(result.DestinationPath, Is.EqualTo(copy), "the LZ4 folder in roms/ps5 is the game");
+                // The image is another type than the LZ4 or zstd folder, so it is imported into roms/ps5 beside it
+                Assert.That(result.DestinationPath, Does.StartWith(Path.Combine(library, "ps5")).And.Matches<string>(File.Exists),
+                    format == "zstd" ? "imported into roms/ps5: the zstd library does not count" : "an image is added beside the LZ4 folder");
+                Assert.That(Directory.Exists(copy), Is.True, "the compressed folder stays where it is");
             }
             finally
             {
