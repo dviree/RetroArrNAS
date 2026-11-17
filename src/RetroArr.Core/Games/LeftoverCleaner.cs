@@ -89,8 +89,68 @@ namespace RetroArr.Core.Games
                 }
                 catch (Exception ex) { _logger.Warn($"[Cleanup] Could not trash {entry}: {ex.Message}"); }
             }
+            // Folders a download left empty: nothing is in them, so they go without the trash
+            // Listed before anything goes: removing a folder dates its parent anew
+            foreach (var dir in EmptyDownloadFolders().ToList())
+            {
+                ct.ThrowIfCancellationRequested();
+                Plan.Add("DELETE " + dir);
+                if (DryRun) { gone++; IO.FileLog.Planned("DELETE", dir, null, "cleanup: empty folder in a download folder"); continue; }
+                try
+                {
+                    // Deepest first, so a folder is only removed when what it held is gone; still empty, never recursive
+                    if (Directory.Exists(dir) && !Directory.EnumerateFileSystemEntries(dir).Any())
+                    {
+                        IO.FileLog.Deleted(dir, "cleanup: empty folder in a download folder, not written to for " + Age.TotalDays + " days");
+                        Directory.Delete(dir);
+                        gone++;
+                    }
+                }
+                catch (Exception ex) { _logger.Warn($"[Cleanup] Could not remove empty folder {dir}: {ex.Message}"); }
+            }
             return gone;
         }
+
+        // A watch folder's sorting folders stay even when empty
+        private static readonly HashSet<string> SortingFolders = new(StringComparer.OrdinalIgnoreCase) { "extracted", "_extracted", "usenet" };
+
+        /// <summary>
+        /// Empty folders in the watch folders RetroArr moves from (move mode): no file anywhere below them, nothing written
+        /// in them for Age. Deepest first. Never the watch folder itself, its sorting folders (extracted/, usenet/), a hidden
+        /// folder, or anything in a watch folder RetroArr only copies from (qBittorrent's): those it never changes.
+        /// </summary>
+        internal IEnumerable<string> EmptyDownloadFolders()
+        {
+            var roots = (DownloadRoots ?? _config.LoadDownloadClients()
+                    .Where(c => c.Enable && c.DeleteSourceAfterImport
+                        && c.Implementation.Equals(Download.WatchFolderClient.ImplementationName, StringComparison.OrdinalIgnoreCase))
+                    .Select(c => c.Host))
+                .Where(r => !string.IsNullOrWhiteSpace(r) && Directory.Exists(r) && !IO.PathGuard.IsCriticalPath(r))
+                .Select(r => Path.GetFullPath(r!).TrimEnd(Path.DirectorySeparatorChar))
+                .Distinct(StringComparer.Ordinal).ToList();
+            foreach (var root in roots)
+            {
+                List<string> dirs;
+                try
+                {
+                    dirs = Directory.EnumerateDirectories(root, "*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, MaxRecursionDepth = 5 })
+                        .Where(d => !Path.GetRelativePath(root, d).Split(Path.DirectorySeparatorChar).Any(p => p.StartsWith('.')))
+                        .OrderByDescending(d => d.Length).ToList();
+                }
+                catch (Exception) { continue; }
+                foreach (var dir in dirs)
+                {
+                    if (Path.GetDirectoryName(dir) == root && SortingFolders.Contains(Path.GetFileName(dir))) continue;
+                    bool empty;
+                    try { empty = !Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Any(); }
+                    catch (Exception) { continue; }
+                    if (empty && Old(dir)) yield return dir;
+                }
+            }
+        }
+
+        // internal for tests: the watch folders to look in, instead of the download clients
+        internal string[]? DownloadRoots;
 
         private IEnumerable<string> Leftovers()
         {

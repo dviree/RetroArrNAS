@@ -53,6 +53,30 @@ namespace RetroArr.Core.Test.Games
         }
 
         [Test]
+        public async Task EmptyFoldersInADownloadFolder_Go_SortingFoldersAndFoldersWithFilesStay()
+        {
+            var downloads = Directory.CreateDirectory(Path.Combine(_root, "downloads")).FullName;
+            _cleaner.DownloadRoots = new[] { downloads };
+            void Old(string dir) => Directory.SetLastWriteTimeUtc(dir, DateTime.UtcNow.AddDays(-5));
+            var emptyRelease = Directory.CreateDirectory(Path.Combine(downloads, "Game-GRP", "PPSA00001-app0")).FullName;
+            Old(emptyRelease); Old(Path.GetDirectoryName(emptyRelease)!);
+            var extracted = Directory.CreateDirectory(Path.Combine(downloads, "extracted")).FullName;
+            Old(extracted);
+            var fresh = Directory.CreateDirectory(Path.Combine(downloads, "Still-Downloading")).FullName;
+            var withFile = Put(Path.Combine(downloads, "Other-GRP", "sub", "game.pkg"));
+            var hidden = Directory.CreateDirectory(Path.Combine(downloads, ".jd-temp")).FullName;
+            Old(hidden);
+
+            await _cleaner.RunOnceAsync();
+
+            Assert.That(Directory.Exists(Path.Combine(downloads, "Game-GRP")), Is.False, "an empty release folder goes, with its empty folders");
+            Assert.That(Directory.Exists(extracted), Is.True, "a sorting folder stays even when empty");
+            Assert.That(Directory.Exists(fresh), Is.True, "a folder made lately may still be filled");
+            Assert.That(File.Exists(withFile), Is.True);
+            Assert.That(Directory.Exists(hidden) && Directory.Exists(downloads), Is.True);
+        }
+
+        [Test]
         public async Task ACopyStillRunning_WithItsFilesOldDates_IsNotOld()
         {
             // A copy or an unpack keeps the files' own dates (a game from last month), but its folders are new

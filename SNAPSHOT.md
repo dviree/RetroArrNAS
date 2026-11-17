@@ -40,7 +40,7 @@ This file only says where things are. Update it when a task changes them.
 - `TrashService`: nothing is deleted. A trashed folder stays whole in the bin, with a sidecar in `.trash-meta`.
   `RegroupFlatEntriesAsync` puts back into their folders any entries laid out flat by older versions.
 - `LeftoverCleaner`: every 6 h it moves old work folders, RetroArr's half-written files and `CLEANUP_FOLDERS` to the
-  trash. `CLEANUP=dryrun` only writes cleanup-plan.log.
+  trash, and removes empty folders in move-mode watch folders (`EmptyDownloadFolders`).
 - `IO/FileActions`: file handling runs by default. FILE_ACTIONS=off/dryrun disables it, or a job list limits it
   (import, cleanup, trash, switch, ps4merge, psnames, bios). Automatic bin purging requires an explicit trash entry.
 - `IO/FileLog`: every move, copy, trash, restore, purge and delete, and each "WOULD ..." step of a dry run, goes to one file, files.log.
