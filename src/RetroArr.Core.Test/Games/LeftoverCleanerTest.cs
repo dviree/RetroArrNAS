@@ -112,7 +112,7 @@ namespace RetroArr.Core.Test.Games
             Assert.That(File.Exists(partial) || File.Exists(partialPkg), Is.False);
             Assert.That(File.Exists(game) && File.Exists(hidden), Is.True, "games and other tools' folders in roms stay");
             Assert.That(Directory.Exists(_work) && Directory.Exists(_owner), Is.True, "the folders themselves stay");
-            Assert.That(Directory.EnumerateFileSystemEntries(Path.Combine(_root, "bin")).Count(e => !Path.GetFileName(e).StartsWith('.')), Is.GreaterThanOrEqualTo(4), "nothing deleted, all in the trash");
+            Assert.That(Directory.EnumerateFileSystemEntries(Path.Combine(_root, "bin", TrashService.DayFolderName(DateTime.Now))).Count(), Is.GreaterThanOrEqualTo(4), "nothing deleted, all in the trash, in the day's folder");
         }
 
         [Test]

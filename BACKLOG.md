@@ -19,6 +19,7 @@ Found bugs, stubs and ideas. Put no personal data here: no owner or host names, 
 - Upgrade trail from 0.28.1 to 0.29.0 (`trail upgrade`, then restart the agent).
 
 ## Done (latest first)
+- The trash keeps each day's things in a folder named by the date (bin/261118/...); emptied day folders go.
 - The cleanup removes empty folders left in move-mode watch folders (2 days untouched; never the root, extracted/,
   usenet/ or hidden folders, never in a copy-only folder such as qBittorrent's).
 - roms/ps5 may hold one copy of a game per type (PKG, folder, LZ4, zstd, image); only the same type blocks an import.

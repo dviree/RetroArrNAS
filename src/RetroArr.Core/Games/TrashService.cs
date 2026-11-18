@@ -70,6 +70,31 @@ namespace RetroArr.Core.Games
         // meta.json) are still listed, restored and purged.
         private const string MetaFolder = ".trash-meta";
 
+        // A day's folder in the trash: "261118" (yyMMdd)
+        private static readonly System.Text.RegularExpressions.Regex _dayName = new(@"^\d{6}$");
+        internal static string DayFolderName(DateTime when) => when.ToString("yyMMdd", System.Globalization.CultureInfo.InvariantCulture);
+        private static bool IsDayFolder(string root, string? dir) =>
+            dir != null && _dayName.IsMatch(Path.GetFileName(dir)) && SamePath(Path.GetDirectoryName(dir), root);
+
+        // Where an entry may lie: right in the trash (entries from before), or in one of its day folders. Nothing else.
+        private static bool LiesInTheTrash(string root, string? path)
+        {
+            var parent = Path.GetDirectoryName(path);
+            return parent != null && (SamePath(parent, root) || IsDayFolder(root, parent));
+        }
+
+        // A day folder left empty goes; the trash itself always stays
+        private static void RemoveEmptyDayFolder(string root, string? path)
+        {
+            var parent = Path.GetDirectoryName(path);
+            try
+            {
+                if (IsDayFolder(root, parent) && Directory.Exists(parent) && !Directory.EnumerateFileSystemEntries(parent!).Any())
+                    Directory.Delete(parent!);
+            }
+            catch (Exception) { }
+        }
+
         private static string FreeName(string root, string name)
         {
             var path = Path.Combine(root, name);
@@ -111,7 +136,9 @@ namespace RetroArr.Core.Games
 
             var payloadName = isDir ? new DirectoryInfo(Path.TrimEndingDirectorySeparator(sourcePath)).Name : Path.GetFileName(sourcePath);
             if (payloadName.StartsWith('.')) payloadName = "_" + payloadName;
-            var destPath = FreeName(root, payloadName);
+            // Each day's things lie in a folder of their own, named by the date: bin/261118/<what went>
+            var day = Directory.CreateDirectory(Path.Combine(root, DayFolderName(DateTime.Now))).FullName;
+            var destPath = FreeName(day, payloadName);
             var entry = new TrashEntry
             {
                 Id = entryId,
@@ -133,6 +160,7 @@ namespace RetroArr.Core.Games
             catch (Exception ex)
             {
                 ForgetSidecar(sidecarPath);
+                RemoveEmptyDayFolder(root, destPath);
                 throw new IOException($"Could not write the trash entry for {sourcePath}, nothing was moved: {ex.Message}", ex);
             }
 
@@ -148,6 +176,7 @@ namespace RetroArr.Core.Games
                 if (!File.Exists(destPath) && !Directory.Exists(destPath))
                 {
                     ForgetSidecar(sidecarPath);
+                    RemoveEmptyDayFolder(root, destPath);
                     throw;
                 }
                 // What got to the trash stays listed there, so it can be found and put back
@@ -304,8 +333,10 @@ namespace RetroArr.Core.Games
                 if (entry == null || string.IsNullOrEmpty(payload) || entry.Id != Path.GetFileNameWithoutExtension(sidecar)) return null;
                 // Each file lies right in the trash; nothing can point outside it
                 if (entry.Files != null && entry.Files.Any(f => Path.GetFileName(f.Name) != f.Name || f.Name.Length == 0 || Path.IsPathRooted(f.Original) || f.Original.Split('/', '\\').Contains(".."))) return null;
-                // The payload lies right in the trash, so a restore or purge never reaches outside it
-                entry.TrashPath = Path.Combine(root, payload);
+                // The payload lies right in the trash or in one of its day folders, so a restore or purge never reaches
+                // outside it; anything else is taken as lying right in the trash under its name
+                var stored = entry.TrashPath;
+                entry.TrashPath = LiesInTheTrash(root, stored) ? Path.GetFullPath(stored) : Path.Combine(root, payload);
                 return entry;
             }
             catch (Exception ex)
@@ -349,6 +380,7 @@ namespace RetroArr.Core.Games
                 }
 
                 DropEntry(entry);
+                RemoveEmptyDayFolder(GetTrashRoot(), entry.TrashPath);
                 RetroArr.Core.IO.FileLog.Restored(entry.TrashPath, target, $"put back from the trash (entry {id})");
                 _logger.Info($"[Trash] Restored {id} to {target}");
                 return true;
@@ -391,13 +423,14 @@ namespace RetroArr.Core.Games
                 if (Directory.Exists(oldDir) && SamePath(Path.GetDirectoryName(entry.TrashPath), oldDir)) Directory.Delete(oldDir, true);
                 else
                 {
-                    // Only what lies right in the trash, never anything outside it
-                    if (!SamePath(Path.GetDirectoryName(entry.TrashPath), root)) return false;
+                    // Only what lies in the trash (right in it or in a day folder), never anything outside it
+                    if (!LiesInTheTrash(root, entry.TrashPath)) return false;
                     if (Directory.Exists(entry.TrashPath)) Delete(entry.TrashPath);
                     else if (File.Exists(entry.TrashPath)) File.Delete(entry.TrashPath);
                     foreach (var file in entry.Files ?? new List<TrashedFile>())
                         if (File.Exists(Path.Combine(root, file.Name))) File.Delete(Path.Combine(root, file.Name));
                     File.Delete(Path.Combine(root, MetaFolder, entry.Id + ".json"));
+                    RemoveEmptyDayFolder(root, entry.TrashPath);
                 }
                 RetroArr.Core.IO.FileLog.Purged(entry.TrashPath, $"{why}; it was {entry.OriginalPath}, trashed {entry.DeletedAt:yyyy-MM-dd HH:mm} UTC, {entry.SizeBytes} bytes (entry {entry.Id})");
                 _logger.Info($"[Trash] Purged {entry.Id}");

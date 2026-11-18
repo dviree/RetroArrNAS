@@ -37,7 +37,7 @@ This file only says where things are. Update it when a task changes them.
 6. Platform detection: `Indexers/PlatformDetector`. What a file says inside it, for the AI: `MetadataSource/FileFacts`.
 
 ## Files and the trash (Core/Games)
-- `TrashService`: nothing is deleted. A trashed folder stays whole in the bin, with a sidecar in `.trash-meta`.
+- `TrashService`: nothing is deleted. A trashed thing lies whole in the bin under that day's folder (`bin/yyMMdd/`), with a sidecar in `.trash-meta`.
   `RegroupFlatEntriesAsync` puts back into their folders any entries laid out flat by older versions.
 - `LeftoverCleaner`: every 6 h it moves old work folders, RetroArr's half-written files and `CLEANUP_FOLDERS` to the
   trash, and removes empty folders in move-mode watch folders (`EmptyDownloadFolders`).

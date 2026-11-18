@@ -95,7 +95,7 @@ namespace RetroArr.Core.Test.Games
             Assert.That(Ps4PkgMergeService.ReadPart(merged)?.Version, Is.EqualTo("01.02"));
             Assert.That(File.Exists(dlc), Is.True, "DLC is separate");
             Assert.That(Directory.GetFiles(_library).Select(Path.GetFileName), Is.EquivalentTo(new[] { Path.GetFileName(merged), "dlc.pkg" }));
-            Assert.That(Directory.GetFiles(_trash, "*.pkg").Select(Path.GetFileName), Is.EquivalentTo(new[] { "base.pkg", "update.pkg", "old-update.pkg" }));
+            Assert.That(Directory.GetFiles(_trash, "*.pkg", SearchOption.AllDirectories).Select(Path.GetFileName), Is.EquivalentTo(new[] { "base.pkg", "update.pkg", "old-update.pkg" }));
             Assert.That(_calls, Is.EqualTo(new[] { "merge", "validate" }));
             Assert.That(await _service.RunOnceAsync(), Is.Zero, "the finished merge is not merged again");
         }

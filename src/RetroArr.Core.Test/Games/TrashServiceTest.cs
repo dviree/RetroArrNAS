@@ -204,7 +204,7 @@ namespace RetroArr.Core.Test.Games
             var listed = false;
             trash.Rename = (from, to) =>
             {
-                listed = Directory.EnumerateFiles(Path.Combine(Path.GetDirectoryName(to)!, ".trash-meta"), "*.json").Any();
+                listed = Directory.EnumerateFiles(Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(to))!, ".trash-meta"), "*.json").Any();
                 Directory.Move(from, to);
             };
 
@@ -331,7 +331,7 @@ namespace RetroArr.Core.Test.Games
             });
             var ex = Assert.ThrowsAsync<TrashPartialMoveException>(() => trash.MoveAsync(game));
             // long past the retention
-            var sidecar = Path.Combine(Path.GetDirectoryName(trash.List().Single().TrashPath)!, ".trash-meta", trash.List().Single().Id + ".json");
+            var sidecar = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(trash.List().Single().TrashPath))!, ".trash-meta", trash.List().Single().Id + ".json");
             var stored = System.Text.Json.JsonSerializer.Deserialize<TrashEntry>(File.ReadAllText(sidecar))!;
             stored.DeletedAt = new DateTime(2020, 1, 1);
             File.WriteAllText(sidecar, System.Text.Json.JsonSerializer.Serialize(stored));
@@ -442,7 +442,7 @@ namespace RetroArr.Core.Test.Games
         }
 
         [Test]
-        public async Task TrashedThings_LieInTheTrashUnderTheirOwnName_NoFolderPerEntry()
+        public async Task TrashedThings_LieInTheDaysFolderUnderTheirOwnName_NoFolderPerEntry()
         {
             var trash = new TrashService(_config);
             var one = Path.Combine(_root, "library", "a", "Zelda.nsp");
@@ -456,13 +456,16 @@ namespace RetroArr.Core.Test.Games
             var first = await trash.MoveAsync(one);
             var second = await trash.MoveAsync(two);
 
+            // One folder per day, named by the date (261118), and in it each thing under its own name
+            var day = Path.Combine(_trash, TrashService.DayFolderName(DateTime.Now));
             Assert.That(Directory.GetFileSystemEntries(_trash).Select(Path.GetFileName).Where(n => !n!.StartsWith('.')),
-                Is.EquivalentTo(new[] { "Zelda.nsp", "Zelda (2).nsp" }));
+                Is.EqualTo(new[] { Path.GetFileName(day) }));
+            Assert.That(Directory.GetFileSystemEntries(day).Select(Path.GetFileName), Is.EquivalentTo(new[] { "Zelda.nsp", "Zelda (2).nsp" }));
             Assert.That(trash.Restore(second!.Id), Is.True);
             Assert.That(File.ReadAllText(two), Is.EqualTo(two));
             Assert.That(trash.PurgeOne(first!.Id), Is.True);
             Assert.That(trash.List(), Is.Empty);
-            Assert.That(Directory.GetFileSystemEntries(_trash).Where(n => !Path.GetFileName(n).StartsWith('.')), Is.Empty);
+            Assert.That(Directory.GetFileSystemEntries(_trash).Where(n => !Path.GetFileName(n).StartsWith('.')), Is.Empty, "an emptied day folder goes too");
         }
 
         [Test]

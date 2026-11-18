@@ -384,7 +384,7 @@ namespace RetroArr.Core.Test.Games
 
             Assert.That(Directory.Exists(Path.Combine(_switch, "Inazuma Eleven")), Is.False);
             Assert.That(Directory.Exists(Path.Combine(_switch, "Kingdom Hearts")), Is.True);
-            var inBin = Path.Combine(_root, "bin", "Inazuma Eleven");
+            var inBin = Path.Combine(_root, "bin", RetroArr.Core.Games.TrashService.DayFolderName(System.DateTime.Now), "Inazuma Eleven");
             Assert.That(Directory.EnumerateFiles(inBin, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(inBin, f).Replace('\\', '/')),
                 Is.EquivalentTo(new[] { "Update v1245184/update.rar", "info.nfo" }), "in its own folder in the bin, as it lay");
         }
@@ -416,7 +416,7 @@ namespace RetroArr.Core.Test.Games
 
             Assert.That(Directory.EnumerateFileSystemEntries(_switch).Select(Path.GetFileName),
                 Is.EqualTo(new[] { "Kingdom Hearts HD 1.5+2.5 Remix [010090C022978000][v0].nsp" }), "one file, no folder");
-            Assert.That(Directory.EnumerateFiles(Path.Combine(_root, "bin")).Count(), Is.EqualTo(1), "the copy");
+            Assert.That(Directory.EnumerateFiles(Path.Combine(_root, "bin", RetroArr.Core.Games.TrashService.DayFolderName(System.DateTime.Now))).Count(), Is.EqualTo(1), "the copy, in the day's folder");
         }
 
         [TestCase("VERDICT: NSP FILE IS CORRECT\nVERDICT: NSP FILE COULD'VE BEEN TAMPERED WITH\nVERDICT: NSP FILE IS CORRECT", true)]
